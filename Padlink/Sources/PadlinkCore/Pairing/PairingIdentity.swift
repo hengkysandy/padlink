@@ -59,7 +59,7 @@ public struct PairingID: Sendable, Hashable {
     }
 }
 
-/// The shared secret used as the TLS 1.3 pre-shared key. 256 bits, so it is
+/// The shared secret used as the TLS 1.2 pre-shared key. 256 bits, so it is
 /// safe to use directly with no password-authenticated key exchange.
 public struct PairingSecret: Sendable, Hashable {
     public static let byteCount = 32

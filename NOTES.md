@@ -210,3 +210,21 @@ Plan 2 (macOS app) and Plan 3 (iPadOS app) get written after Core is verified.
 
 
 ## 2026-08-13 11:14 — (auto session marker)
+
+## 2026-08-13 — PadlinkCore complete
+
+- **90 tests passing**, `swift test` from `Padlink/`. Includes real TLS 1.2 PSK
+  handshakes over loopback, not just unit-level codec and framing tests.
+- **`KeychainPairingStore` is still to be built**, deferred to the app plans (Plan 2
+  and Plan 3). An unsigned `swift test` binary has no access to the data protection
+  keychain, so it cannot be tested inside Core. Core ships the `PairingStore`
+  protocol plus an in-memory implementation for tests and for the app plans to
+  build against.
+- **`HeartbeatMonitor` is built and tested, but deliberately not wired into
+  `PadlinkConnection`.** The apps own the ping timers, because the connection layer
+  should not own timing. Heartbeat pings are not yet active over the wire.
+- **Carry-forward warning:** `PairingRecord` and `PairingSecret` have no redaction
+  on string interpolation. Logging a record today would print the 256-bit
+  pre-shared key in plain text. The apps will add logging, and the project
+  `CLAUDE.md` forbids logging secrets, so both types need a redacting
+  `CustomStringConvertible` before any app-layer logging exists.

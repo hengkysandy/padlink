@@ -176,8 +176,13 @@ apartment building, hotel) can see the Bonjour advertisement. Requirements:
 
 ### Fallback for when the camera is unavailable
 
-The Mac shows the same secret as a **10-character base32 code** (about 50 bits), typed by
-hand once. Strong enough to use directly, so it still avoids needing a PAKE.
+**Not in v1.** An earlier draft said the Mac would show "the same secret as a
+10-character base32 code". That is not possible: 10 base32 characters hold 50
+bits and the secret is 256 bits.
+
+If this path is built later, the corrected design is a **separate 80-bit secret
+shown as 16 base32 characters in four groups of four**. Short enough to type
+once, and far beyond offline brute force.
 
 ### QR payload format
 
@@ -220,11 +225,14 @@ secret never syncs to iCloud and never leaves the device.
 
 ## 5. Transport
 
-### Choice: Network.framework, Bonjour discovery, TCP with TLS 1.3
+### Choice: Network.framework, Bonjour discovery, TCP with TLS 1.2
 
 The Mac runs an `NWListener` advertising `_padlink._tcp` over Bonjour. The iPad runs an
 `NWBrowser`, finds the Mac by name, and opens an `NWConnection`. Nagle's algorithm is
 disabled (`NWProtocolTCP.Options.noDelay = true`) so small packets go out immediately.
+The connection is secured with TLS 1.2 using ECDHE_PSK ciphersuites pinned explicitly
+(`0xD001`, `0xCCAC`, `0x00AA`), as established in section 4: TLS 1.3 is not achievable
+because `sec_protocol_options_add_pre_shared_key` is RFC 4279 style and TLS 1.2 only.
 
 ### Rejected alternatives
 

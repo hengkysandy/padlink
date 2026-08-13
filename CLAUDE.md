@@ -1,6 +1,19 @@
 # Ad-hoc task workspace
 
-This directory is a self-contained **named conversation** for an investigation, debugging session, or ad-hoc DevOps task. It is NOT a code repo — there's no app to ship. The goal is durable continuity across sessions, days, and weeks.
+This directory is a self-contained **named conversation**, and it is now a hybrid: an
+ongoing journal plus a real Swift codebase. `NOTES.md` stays the running journal, kept
+exactly as before, terse dated entries recording commands, findings, and decisions.
+`Padlink/` is a real codebase with its own package (`PadlinkCore`) and tests, and
+`docs/superpowers/` holds the design spec and implementation plans. The goal is durable
+continuity across sessions, days, and weeks, for both the journal and the code.
+
+**Running the tests.** `swift-testing` is not in the Command Line Tools toolchain that
+`xcode-select` currently points at, so tests must be run with the Xcode toolchain
+explicitly, from the `Padlink` directory:
+
+```
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
+```
 
 ## On every session start (automatic behavior)
 
