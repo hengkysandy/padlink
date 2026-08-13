@@ -1,0 +1,64 @@
+name: PadlinkMac
+options:
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+
+packages:
+  PadlinkCore:
+    path: .
+
+targets:
+  PadlinkMac:
+    type: application
+    platform: macOS
+    sources:
+      - PadlinkMac
+    dependencies:
+      - package: PadlinkCore
+        product: PadlinkCore
+    info:
+      path: PadlinkMac/Info.plist
+      properties:
+        CFBundleName: Padlink
+        CFBundleDisplayName: Padlink
+        # Menu bar only. No Dock icon, no main window.
+        LSUIElement: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hengkysandy.padlink.mac
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        # Ad-hoc signing for local development. Release builds use a
+        # Developer ID identity and notarization instead.
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: "YES"
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: ""
+
+  PadlinkMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - PadlinkMacTests
+    dependencies:
+      - target: PadlinkMac
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        # No info: block for this target, so XcodeGen has no plist to
+        # generate a path for. Generate one automatically instead, or
+        # code signing fails.
+        GENERATE_INFOPLIST_FILE: "YES"
+
+schemes:
+  PadlinkMac:
+    build:
+      targets:
+        PadlinkMac: all
+    test:
+      targets:
+        - PadlinkMacTests
+    run:
+      config: Debug
