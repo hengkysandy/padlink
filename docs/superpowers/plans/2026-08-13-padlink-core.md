@@ -12,6 +12,7 @@
 
 ## Global Constraints
 
+- **Every `swift build` and `swift test` must be prefixed with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.** This machine's `xcode-select` points at the Command Line Tools, and **swift-testing is not in the Command Line Tools toolchain**, so a bare `swift test` fails with `no such module 'Testing'`. `DEVELOPER_DIR` overrides the toolchain for one command and needs no sudo. Example: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter FrameParser`. (The permanent alternative is `sudo xcode-select -s /Applications/Xcode.app`, which the repo owner must run; until then, use the prefix.)
 - Package name `PadlinkCore`. Platforms: `.macOS(.v15)`, `.iOS(.v18)`.
 - Swift tools version `6.2`. Strict concurrency is on by default in Swift 6 language mode. All public types must be `Sendable`.
 - **No third-party dependencies.** Everything needed is in the Swift toolchain or Apple's SDKs.
