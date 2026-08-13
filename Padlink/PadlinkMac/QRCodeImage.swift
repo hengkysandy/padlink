@@ -16,8 +16,11 @@ enum QRCodeImage {
 
         guard let output = filter.outputImage else { return nil }
 
+        // CIQRCodeGenerator's output is always square, so deriving the scale
+        // from the width alone is safe here.
         let scale = sideLength / output.extent.width
-        let scaled = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let scaled = output.samplingNearest()
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
         let context = CIContext()
         guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
