@@ -22,7 +22,6 @@ final class PadlinkService: ObservableObject {
 
     private var listener: NWListener?
     private var connection: PadlinkConnection?
-    private var acceptedConnections: [NWConnection] = []
     private var acceptedKeys: [TLSPSK] = []
     private var candidate: (payload: PairingPayload, psk: TLSPSK)?
     private var pairingTimer: Timer?
@@ -53,7 +52,6 @@ final class PadlinkService: ObservableObject {
         pairingTimer = nil
         listener?.cancel()
         listener = nil
-        acceptedConnections.removeAll()
         // Captured before nulling out `connection`. `Task { }` only runs once
         // `stop()` returns control to the MainActor, so reading `connection`
         // inside the closure instead of capturing it here would always see
@@ -108,11 +106,12 @@ final class PadlinkService: ObservableObject {
     }
 
     /// Pre-shared keys are fixed when `NWParameters` is created, so any change
-    /// to the accepted set means a new listener. Live connections are dropped,
-    /// which is acceptable because the user has deliberately started pairing.
+    /// to the accepted set means a new listener. This only stops the listener
+    /// from accepting new inbound connections; any connection already
+    /// established keeps running, because rebuilding never touches
+    /// `self.connection`.
     private func restartListener() throws {
         listener?.cancel()
-        acceptedConnections.removeAll()
 
         guard acceptedKeys.isEmpty == false else {
             listener = nil
@@ -136,7 +135,16 @@ final class PadlinkService: ObservableObject {
     }
 
     private func accept(_ raw: NWConnection) {
-        acceptedConnections.append(raw)
+        // Only one controlling device at a time. A second connection is most
+        // often the same device reconnecting after a Wi-Fi drop or a sleep
+        // and wake, before its old socket has finished dying, so the old
+        // connection is torn down in favour of the new one rather than
+        // rejecting the new one. Rejecting would leave the user stuck if the
+        // old socket is a zombie that never fails on its own.
+        if let existing = connection {
+            Task { await existing.cancel() }
+        }
+
         let wrapped = PadlinkConnection(connection: raw)
         connection = wrapped
 
@@ -174,10 +182,18 @@ final class PadlinkService: ObservableObject {
             }
         }
 
+        let reason = await wrapped.closeReason
+
+        // Identity-checked: a successor connection may already have replaced
+        // `self.connection` by the time this dying loop's stream finishes
+        // (see `accept`). Without this guard, a stale loop ending would wipe
+        // out the live successor's state and wrongly release held buttons
+        // and modifiers that the successor's session, not this one, owns.
+        guard connection === wrapped else { return }
+
         // The stream finishing is the signal that the connection is gone, and
         // therefore the signal to release any held button or modifier.
         router.releaseEverything()
-        let reason = await wrapped.closeReason
         connection = nil
         if case .connected = state {
             state = reason == .framingViolation ? .failed("framing violation") : .idle
@@ -185,7 +201,10 @@ final class PadlinkService: ObservableObject {
     }
 
     /// A successful connection during a pairing window promotes the candidate
-    /// to a stored pairing, and rebuilds the listener once more.
+    /// to a stored pairing. No listener rebuild is needed: the promoted
+    /// record carries the same id and secret as the candidate already
+    /// accepted by the running listener, so the set of keys it will accept
+    /// does not actually change.
     private func promoteCandidateIfNeeded(deviceName: String) {
         guard let candidate else { return }
         let record = PairingRecord(
@@ -195,7 +214,21 @@ final class PadlinkService: ObservableObject {
             serviceName: candidate.payload.serviceName,
             pairedAt: Date()
         )
-        try? store.save(record)
+
+        do {
+            try store.save(record)
+        } catch {
+            // The device is connected right now, over the candidate's key,
+            // which the running listener still accepts. But this pairing did
+            // not reach disk, so the candidate is kept rather than cleared:
+            // clearing it here would let a later listener rebuild (any
+            // pairing attempt, or a restart) silently reject a device the
+            // user believes is already paired. Surfacing `.failed` instead
+            // of leaving `.connected` standing means the failure is visible
+            // and the user can retry pairing.
+            state = .failed("Could not save pairing: \(error)")
+            return
+        }
 
         pairingTimer?.invalidate()
         pairingTimer = nil
