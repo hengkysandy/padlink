@@ -18,6 +18,13 @@ public enum ClientMessage: Sendable, Equatable {
     /// Text to insert, layout-independent. Used when no modifier beyond shift is active.
     case keyText(String)
     case keyCode(key: PadlinkKey, isDown: Bool, modifiers: KeyModifiers)
+    /// The complete current modifier state, reported on its own rather than
+    /// attached to a keystroke. This is what lets Command stay held across
+    /// several Tab presses, which the macOS app switcher requires.
+    ///
+    /// It is absolute, not a delta, so a lost message self-corrects on the
+    /// next one instead of leaving the two sides permanently disagreeing.
+    case modifierState(modifiers: KeyModifiers)
     case ping(seq: UInt32)
 }
 

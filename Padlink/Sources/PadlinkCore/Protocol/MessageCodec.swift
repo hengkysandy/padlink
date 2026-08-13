@@ -10,6 +10,7 @@ public enum ClientMessageCodec {
         case keyText = 5
         case keyCode = 6
         case ping = 7
+        case modifierState = 8
     }
 
     public static func encode(_ message: ClientMessage) throws -> Data {
@@ -39,6 +40,9 @@ public enum ClientMessageCodec {
             writer.write(TypeByte.keyCode.rawValue)
             writer.write(key.rawValue)
             writer.write(isDown)
+            writer.write(modifiers.rawValue)
+        case let .modifierState(modifiers):
+            writer.write(TypeByte.modifierState.rawValue)
             writer.write(modifiers.rawValue)
         case let .ping(seq):
             writer.write(TypeByte.ping.rawValue)
@@ -92,6 +96,12 @@ public enum ClientMessageCodec {
                 isDown: isDown,
                 modifiers: KeyModifiers(rawValue: rawModifiers)
             )
+        case .modifierState:
+            let rawModifiers = try reader.readUInt8()
+            guard rawModifiers & KeyModifiers.reservedMask.rawValue == 0 else {
+                throw CodecError.reservedModifierBitsSet(rawModifiers)
+            }
+            message = .modifierState(modifiers: KeyModifiers(rawValue: rawModifiers))
         case .ping:
             message = .ping(seq: try reader.readUInt32())
         }

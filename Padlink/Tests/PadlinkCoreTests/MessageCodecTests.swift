@@ -13,6 +13,7 @@ private let allClientMessages: [ClientMessage] = [
     .keyText("héllo 🌍"),
     .keyCode(key: .c, isDown: true, modifiers: [.command]),
     .keyCode(key: .f12, isDown: false, modifiers: [.shift, .control, .option, .command, .function]),
+    .modifierState(modifiers: [.command, .function]),
     .ping(seq: 4_000_000_000)
 ]
 
@@ -33,6 +34,29 @@ func clientMessagesRoundTrip(message: ClientMessage) throws {
 func serverMessagesRoundTrip(message: ServerMessage) throws {
     let encoded = try ServerMessageCodec.encode(message)
     #expect(try ServerMessageCodec.decode(encoded) == message)
+}
+
+@Test func modifierStateRoundTrips() throws {
+    let message = ClientMessage.modifierState(modifiers: [.command, .shift])
+    let encoded = try ClientMessageCodec.encode(message)
+    #expect(try ClientMessageCodec.decode(encoded) == message)
+}
+
+@Test func modifierStateWithNoModifiersRoundTrips() throws {
+    let message = ClientMessage.modifierState(modifiers: [])
+    #expect(try ClientMessageCodec.decode(try ClientMessageCodec.encode(message)) == message)
+}
+
+@Test func modifierStateUsesTypeByte8() throws {
+    let encoded = try ClientMessageCodec.encode(.modifierState(modifiers: [.command]))
+    #expect(encoded.first == 8)
+}
+
+@Test func modifierStateRejectsReservedBits() {
+    // type 8, modifiers 0b0010_0000 (bit 5 is reserved)
+    #expect(throws: CodecError.reservedModifierBitsSet(0b0010_0000)) {
+        _ = try ClientMessageCodec.decode(Data([8, 0b0010_0000]))
+    }
 }
 
 @Test func unknownClientMessageTypeIsReported() {
