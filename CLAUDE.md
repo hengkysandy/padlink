@@ -7,13 +7,17 @@ exactly as before, terse dated entries recording commands, findings, and decisio
 `docs/superpowers/` holds the design spec and implementation plans. The goal is durable
 continuity across sessions, days, and weeks, for both the journal and the code.
 
-**Running the tests.** `swift-testing` is not in the Command Line Tools toolchain that
-`xcode-select` currently points at, so tests must be run with the Xcode toolchain
-explicitly, from the `Padlink` directory:
+**Running the tests.** From the `Padlink` directory:
 
 ```
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
+swift test
 ```
+
+`xcode-select` was switched to `/Applications/Xcode.app` on 2026-08-13, so this works
+directly. If it ever fails with `no such module 'Testing'`, `xcode-select` has been
+pointed back at the Command Line Tools, which do not ship `swift-testing`. Fix it with
+`sudo xcode-select -s /Applications/Xcode.app`, or override for one command with
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`.
 
 ## On every session start (automatic behavior)
 
