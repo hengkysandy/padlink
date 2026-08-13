@@ -60,6 +60,76 @@ func charactersMapToPadlinkKeys(pair: (character: Character, key: PadlinkKey)) {
     #expect(KeyRouter.padlinkKey(forCharacter: pair.character) == pair.key)
 }
 
+@Test(arguments: [
+    (Character("!"), PadlinkKey.digit1),
+    (Character("@"), PadlinkKey.digit2),
+    (Character("#"), PadlinkKey.digit3),
+    (Character("$"), PadlinkKey.digit4),
+    (Character("%"), PadlinkKey.digit5),
+    (Character("^"), PadlinkKey.digit6),
+    (Character("&"), PadlinkKey.digit7),
+    (Character("*"), PadlinkKey.digit8),
+    (Character("("), PadlinkKey.digit9),
+    (Character(")"), PadlinkKey.digit0),
+    (Character("_"), PadlinkKey.minus),
+    (Character("+"), PadlinkKey.equal),
+    (Character("{"), PadlinkKey.leftBracket),
+    (Character("}"), PadlinkKey.rightBracket),
+    (Character("|"), PadlinkKey.backslash),
+    (Character(":"), PadlinkKey.semicolon),
+    (Character("\""), PadlinkKey.quote),
+    (Character("~"), PadlinkKey.grave),
+    (Character("<"), PadlinkKey.comma),
+    (Character(">"), PadlinkKey.period),
+    (Character("?"), PadlinkKey.slash)
+])
+func shiftedSymbolsMapToTheirBasePhysicalKey(pair: (character: Character, key: PadlinkKey)) {
+    // A shifted symbol sits on the same physical key as its base character,
+    // exactly like an uppercase letter sits on the same key as its lowercase
+    // form. Without this, Cmd+Shift+3 (screenshot) would have no key to land
+    // on and would silently fall back to typing the literal "#".
+    #expect(KeyRouter.padlinkKey(forCharacter: pair.character) == pair.key)
+}
+
+@Test func shiftedDigitShortcutSendsKeyDownThenKeyUpForTheDigitKey() {
+    // Regression test for the macOS screenshot family (Cmd+Shift+3/4/5).
+    // "#" is what the iPad keyboard produces for Shift+3, but the shortcut
+    // must land on the physical digit-3 key, not fall back to typing "#".
+    #expect(
+        KeyRouter.messages(forCharacter: "#", modifiers: [.command, .shift]) == [
+            .keyCode(key: .digit3, isDown: true, modifiers: [.command, .shift]),
+            .keyCode(key: .digit3, isDown: false, modifiers: [.command, .shift])
+        ]
+    )
+}
+
+@Test func controlAloneTakesTheKeyCodePath() {
+    #expect(
+        KeyRouter.messages(forCharacter: "a", modifiers: [.control]) == [
+            .keyCode(key: .a, isDown: true, modifiers: [.control]),
+            .keyCode(key: .a, isDown: false, modifiers: [.control])
+        ]
+    )
+}
+
+@Test func optionAloneTakesTheKeyCodePath() {
+    #expect(
+        KeyRouter.messages(forCharacter: "a", modifiers: [.option]) == [
+            .keyCode(key: .a, isDown: true, modifiers: [.option]),
+            .keyCode(key: .a, isDown: false, modifiers: [.option])
+        ]
+    )
+}
+
+@Test func functionAloneTakesTheKeyCodePath() {
+    #expect(
+        KeyRouter.messages(forCharacter: "a", modifiers: [.function]) == [
+            .keyCode(key: .a, isDown: true, modifiers: [.function]),
+            .keyCode(key: .a, isDown: false, modifiers: [.function])
+        ]
+    )
+}
+
 @Test func unmappedCharacterReturnsNil() {
     #expect(KeyRouter.padlinkKey(forCharacter: "🌍") == nil)
 }

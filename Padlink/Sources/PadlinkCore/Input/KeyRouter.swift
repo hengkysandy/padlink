@@ -40,6 +40,19 @@ public enum KeyRouter {
         ]
         for (character, key) in punctuation { map[character] = key }
 
+        // Shift-produced symbols sit on the same physical key as their base
+        // character, exactly like an uppercase letter sits on the same key
+        // as its lowercase form. Without these, a shifted shortcut such as
+        // Cmd+Shift+3 (screenshot) would have no key to land on.
+        let shiftedSymbols: [(Character, PadlinkKey)] = [
+            ("!", .digit1), ("@", .digit2), ("#", .digit3), ("$", .digit4), ("%", .digit5),
+            ("^", .digit6), ("&", .digit7), ("*", .digit8), ("(", .digit9), (")", .digit0),
+            ("_", .minus), ("+", .equal), ("{", .leftBracket), ("}", .rightBracket),
+            ("|", .backslash), (":", .semicolon), ("\"", .quote), ("~", .grave),
+            ("<", .comma), (">", .period), ("?", .slash)
+        ]
+        for (character, key) in shiftedSymbols { map[character] = key }
+
         return map
     }()
 
