@@ -2381,7 +2381,12 @@ struct PadlinkMacApp: App {
     @StateObject private var service: PadlinkService
     @State private var pairing: PairingPayload?
     @State private var pairingExpiry = Date()
-    @State private var showOnboarding = false
+
+    // SwiftUI `Window` scenes open through these environment actions, not
+    // through a boolean. An earlier draft declared a `showOnboarding` flag,
+    // set it, and never read it, so clicking the menu items opened nothing.
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
 
     init() {
         let router = MessageRouter(
@@ -2402,8 +2407,11 @@ struct PadlinkMacApp: App {
                 service: service,
                 accessibility: accessibility,
                 onPair: startPairing,
-                onShowOnboarding: { showOnboarding = true }
+                onShowOnboarding: { openWindow(id: "onboarding") }
             )
+            // Without this the app launches, shows an icon, and silently does
+            // nothing: no listener, no Bonjour advertisement, no pairing.
+            .task { await service.start() }
         }
 
         Window("Pair a device", id: "pairing") {
@@ -2411,6 +2419,7 @@ struct PadlinkMacApp: App {
                 PairingView(payload: pairing, expiresAt: pairingExpiry) {
                     service.cancelPairing()
                     self.pairing = nil
+                    dismissWindow(id: "pairing")
                 }
             }
         }
@@ -2432,12 +2441,17 @@ struct PadlinkMacApp: App {
             let payload = try service.beginPairing()
             pairing = payload
             pairingExpiry = Date().addingTimeInterval(PadlinkService.pairingWindow)
+            // The window has to be opened explicitly. Setting `pairing` only
+            // populates the scene's content.
+            openWindow(id: "pairing")
         } catch {
             pairing = nil
         }
     }
 }
 ```
+
+**The Quit button must stop the service, not just terminate.** `MenuContentView`'s quit action calls `service.stop()` first, so a connection dying with a modifier held releases it rather than leaving the key stuck on the user's Mac until they reboot. Terminating without that call skips the whole release-everything path this project built.
 
 - [ ] **Step 4: Build and confirm the existing tests still pass**
 
