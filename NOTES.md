@@ -111,6 +111,59 @@ keyboard and trackpad that drives the MacBook.
   Fallback: v1 supports exactly one paired iPad. The pairing ID is already in the QR
   payload and Keychain schema, so nothing needs redesigning later.
 
+## 2026-08-13 — Spike result: TLS-PSK (Task 0)
+
+**The spec was wrong about TLS 1.3. This is the headline finding.**
+
+`sec_protocol_options_add_pre_shared_key` is RFC 4279 style, which is **TLS 1.2 only**.
+Every TLS 1.3 configuration failed the handshake with error -9858. The SDK header for
+`sec_protocol_options_set_tls_pre_shared_key_identity_hint` cites RFC 4279 directly,
+and `tls_ciphersuite_t` exposes no PSK suites at all.
+
+**Second finding: plain PSK has no forward secrecy.** The first working config found
+was `TLS_PSK_WITH_AES_128_GCM_SHA256` (0x00A8), which has no Diffie-Hellman. The spec
+promises "a captured recording cannot be decrypted later", and plain PSK breaks that
+promise. Tested the ephemeral variants and they work, so forward secrecy is kept.
+
+### What works (measured, not assumed)
+
+| Config | Result |
+|---|---|
+| TLS 1.3, any ciphersuite | **fails**, -9858 handshake failed |
+| TLS 1.2 + `ECDHE_PSK_AES_128_GCM_SHA256` (0xD001) | OK, forward secret |
+| TLS 1.2 + `ECDHE_PSK_AES_256_GCM_SHA384` (0xD002) | OK, forward secret |
+| TLS 1.2 + `ECDHE_PSK_CHACHA20_POLY1305` (0xCCAC) | OK, forward secret |
+| TLS 1.2 + `ECDHE_PSK_AES_128_CBC_SHA256` (0xC037) | OK, forward secret |
+| TLS 1.2 + `DHE_PSK_AES_128_GCM_SHA256` (0x00AA) | OK, forward secret |
+| TLS 1.2 + `PSK_AES_128_GCM_SHA256` (0x00A8) | OK, **no forward secrecy** |
+| TLS 1.2 + no explicit ciphersuite | OK, **but may negotiate plain PSK** |
+
+**Decision: TLS 1.2 with the ECDHE_PSK suites pinned explicitly.** Pinning is not
+optional. Leaving the ciphersuite list empty also completes a handshake, but then a
+non-forward-secret suite can be negotiated.
+
+`tls_ciphersuite_t` has no PSK cases, but it is `UInt16`-backed, so the suites are
+built by raw value: `tls_ciphersuite_t(rawValue: 0xD001)!`.
+
+### Answers to the three spike questions
+
+1. **Several PSKs on one listener: YES.** Registered keys A and B on one `NWListener`;
+   both clients connected and TLS picked the right secret by identity. So v1 can
+   support several paired iPads. No fallback needed.
+2. **Wrong key rejected: YES.** A client with an unregistered key never reaches ready.
+3. **`as __DispatchData` compiles.** Keep the cast.
+
+### Two code-level gotchas found the hard way
+
+- **`NWConnection` instances must be retained.** ARC frees them the moment the local
+  goes out of scope, and the handshake never completes. Applies to accepted connections
+  on the listener side too. The original plan code had this bug.
+- **A failed PSK handshake reports as `.waiting`, not `.failed`**, and Network.framework
+  then retries forever. Any code waiting for a terminal state must treat `.waiting` as
+  a failure or it hangs.
+- Swift 6 strict concurrency forbids mutating a captured local from the `@Sendable`
+  state handlers. State shared with Network.framework callbacks needs a reference box.
+
 ## 2026-08-13 — Plan 1 written (PadlinkCore)
 
 `docs/superpowers/plans/2026-08-13-padlink-core.md`, 12 tasks, all TDD.
