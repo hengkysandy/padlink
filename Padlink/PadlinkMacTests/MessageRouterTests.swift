@@ -117,14 +117,65 @@ final class MessageRouterTests: XCTestCase {
     }
 
     func testTwoQuickClicksAreReportedAsADoubleClick() {
+        // Pinned on all three calls, not just the last, so a regression that
+        // moves the increment-and-interval-check into the up branch (leaving
+        // the down branch to only record time and button) cannot hide behind
+        // this exact sequence. That mistake still ends on clickCount == 2 for
+        // the final call, but reports the up event's clickCount as 2 as
+        // well, which is wrong: a single click's up must never look like a
+        // double click.
         router.handle(.pointerButton(button: .left, isDown: true))
+        guard case let .button(_, _, _, firstDownCount) = synthesizer.calls[0] else {
+            return XCTFail("expected a button call")
+        }
+        XCTAssertEqual(firstDownCount, 1)
+
         router.handle(.pointerButton(button: .left, isDown: false))
+        guard case let .button(_, _, _, upCount) = synthesizer.calls[1] else {
+            return XCTFail("expected a button call")
+        }
+        XCTAssertEqual(upCount, 1)
+
         router.handle(.pointerButton(button: .left, isDown: true))
+        guard case let .button(_, _, _, secondDownCount) = synthesizer.calls[2] else {
+            return XCTFail("expected a button call")
+        }
+        XCTAssertEqual(secondDownCount, 2)
+    }
+
+    func testReleaseEverythingUsesTheCurrentCursorLocation() {
+        // releaseEverything() must read the cursor location fresh, not reuse
+        // whatever point was current when the button went down. Otherwise a
+        // release after the pointer has moved posts the wrong coordinates.
+        router.handle(.pointerButton(button: .left, isDown: true))
+        let newLocation = CGPoint(x: 999, y: 42)
+        synthesizer.cursorLocation = newLocation
+
+        router.releaseEverything()
+
+        guard case let .button(.left, isDown: false, at: point, _) = synthesizer.calls.last else {
+            return XCTFail("expected a button release, got \(synthesizer.calls)")
+        }
+        XCTAssertEqual(point, newLocation)
+    }
+
+    func testClickCountResetsAfterTheDoubleClickIntervalElapses() {
+        var currentTime = Date(timeIntervalSince1970: 0)
+        let clockedRouter = MessageRouter(
+            synthesizer: synthesizer,
+            geometry: ScreenGeometry(topLeftFrames: [CGRect(x: 0, y: 0, width: 1440, height: 900)]),
+            now: { currentTime }
+        )
+
+        clockedRouter.handle(.pointerButton(button: .left, isDown: true))
+        // Longer than the 0.5 second double-click interval.
+        currentTime = currentTime.addingTimeInterval(1.0)
+        clockedRouter.handle(.pointerButton(button: .left, isDown: true))
 
         guard case let .button(_, _, _, clickCount) = synthesizer.calls.last else {
             return XCTFail("expected a button call")
         }
-        XCTAssertEqual(clickCount, 2)
+        XCTAssertEqual(clickCount, 1)
     }
 
     func testHelloAndPingAreIgnoredByTheRouter() {

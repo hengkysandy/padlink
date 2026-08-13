@@ -11,6 +11,7 @@ final class MessageRouter {
     private let synthesizer: any InputSynthesizing
     private var geometry: ScreenGeometry
     private let acceleration: PointerAcceleration
+    private let now: () -> Date
 
     private(set) var held = HeldInputState()
 
@@ -24,11 +25,13 @@ final class MessageRouter {
     init(
         synthesizer: any InputSynthesizing,
         geometry: ScreenGeometry,
-        acceleration: PointerAcceleration = .default
+        acceleration: PointerAcceleration = .default,
+        now: @escaping () -> Date = { Date() }
     ) {
         self.synthesizer = synthesizer
         self.geometry = geometry
         self.acceleration = acceleration
+        self.now = now
     }
 
     /// Called when displays are added, removed, or rearranged.
@@ -104,15 +107,15 @@ final class MessageRouter {
 
     private func handleButton(_ button: PointerButton, isDown: Bool) {
         if isDown {
-            let now = Date()
+            let clickTime = now()
             if let last = lastClickTime,
                lastClickButton == button,
-               now.timeIntervalSince(last) < Self.doubleClickInterval {
+               clickTime.timeIntervalSince(last) < Self.doubleClickInterval {
                 clickCount += 1
             } else {
                 clickCount = 1
             }
-            lastClickTime = now
+            lastClickTime = clickTime
             lastClickButton = button
         }
 
