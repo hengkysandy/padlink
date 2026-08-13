@@ -8,21 +8,6 @@ public enum ConnectionError: Error, Equatable, Sendable {
     case failed(String)
 }
 
-/// Swift 6 forbids mutating a captured local from a @Sendable state handler.
-/// Network.framework's callback closures (`stateUpdateHandler`, `receive`
-/// completion, `send` completion) are @Sendable, so any local they mutate
-/// needs this lock-backed box instead of a plain `var`. Same shape as Task 9's
-/// TransportTests.swift.
-private final class Box<T>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage: T
-    init(_ value: T) { storage = value }
-    var value: T {
-        get { lock.lock(); defer { lock.unlock() }; return storage }
-        set { lock.lock(); defer { lock.unlock() }; storage = newValue }
-    }
-}
-
 /// A framed message connection over an `NWConnection`.
 ///
 /// It hands out whole frames as `Data` rather than typed messages, because the

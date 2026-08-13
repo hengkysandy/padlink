@@ -12,19 +12,6 @@ private func psk(_ byte: UInt8) -> TLSPSK {
     ))
 }
 
-/// Swift 6 forbids mutating a captured local from a @Sendable state handler,
-/// and accepted connections must be retained or ARC frees them mid-handshake.
-/// This box covers both needs.
-private final class Box<T>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage: T
-    init(_ value: T) { storage = value }
-    var value: T {
-        get { lock.lock(); defer { lock.unlock() }; return storage }
-        set { lock.lock(); defer { lock.unlock() }; storage = newValue }
-    }
-}
-
 /// Starts a listener and returns its port, plus the box retaining accepted
 /// connections. The caller cancels the listener and must keep the box alive.
 private func startListener(

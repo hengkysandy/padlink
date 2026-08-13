@@ -8,24 +8,15 @@ private let sharedPSK = TLSPSK(
     key: Data(repeating: 0xF0, count: 32)
 )
 
-/// Swift 6 forbids mutating a captured local from a @Sendable state handler,
-/// and accepted connections must be retained or ARC frees them mid-handshake.
-/// This box covers both needs. Same shape as Task 9's TransportTests.swift.
-private final class Box<T>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var storage: T
-    init(_ value: T) { storage = value }
-    var value: T {
-        get { lock.lock(); defer { lock.unlock() }; return storage }
-        set { lock.lock(); defer { lock.unlock() }; storage = newValue }
-    }
-}
-
-/// Brings up a listener and one connected client, both wrapped.
+/// Brings up a listener and one connected client, both wrapped. Also returns
+/// the raw client `NWConnection` so tests can write bytes directly to the
+/// wire, bypassing `Framer`, to exercise error paths `PadlinkConnection`
+/// itself never produces.
 private func connectedPair() async throws -> (
     server: PadlinkConnection,
     client: PadlinkConnection,
-    listener: NWListener
+    listener: NWListener,
+    rawClient: NWConnection
 ) {
     let listener = try NWListener(
         using: PadlinkTransport.listenerParameters(psks: [sharedPSK]),
@@ -76,11 +67,40 @@ private func connectedPair() async throws -> (
     try await server.start()
     try await clientStart
 
-    return (server, client, listener)
+    return (server, client, listener, rawClient)
+}
+
+/// Awaits the first element from `stream`, or `nil` if `timeoutSeconds`
+/// elapses first.
+///
+/// The outer optional distinguishes "timed out" (`nil`) from "got a result"
+/// (`.some`); the inner optional is `iterator.next()`'s own result, where
+/// `nil` means the stream finished. Used so a regression that leaves
+/// `incoming` hanging fails the test instead of stalling the whole suite.
+private func firstElement(
+    from stream: AsyncStream<Data>,
+    timeoutSeconds: Double
+) async -> Data?? {
+    let resumed = Box(false)
+    return await withCheckedContinuation { (continuation: CheckedContinuation<Data??, Never>) in
+        Task {
+            var iterator = stream.makeAsyncIterator()
+            let value = await iterator.next()
+            guard !resumed.value else { return }
+            resumed.value = true
+            continuation.resume(returning: .some(value))
+        }
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+            guard !resumed.value else { return }
+            resumed.value = true
+            continuation.resume(returning: .none)
+        }
+    }
 }
 
 @Test func aClientMessageArrivesWholeAtTheServer() async throws {
-    let (server, client, listener) = try await connectedPair()
+    let (server, client, listener, _) = try await connectedPair()
     defer { listener.cancel() }
 
     let sent = ClientMessage.keyCode(key: .c, isDown: true, modifiers: [.command])
@@ -96,7 +116,7 @@ private func connectedPair() async throws -> (
 
 @Test func manyMessagesArriveInOrder() async throws {
     // Proves the framing survives the stream being chopped up by TCP.
-    let (server, client, listener) = try await connectedPair()
+    let (server, client, listener, _) = try await connectedPair()
     defer { listener.cancel() }
 
     let sent = (0 ..< 200).map {
@@ -121,7 +141,7 @@ private func connectedPair() async throws -> (
     // This is the release-everything seam. When this stream ends, the Mac must
     // release every held mouse button and modifier, or the user is left with a
     // stuck Cmd key.
-    let (server, client, listener) = try await connectedPair()
+    let (server, client, listener, _) = try await connectedPair()
     defer { listener.cancel() }
 
     try await client.send(.pointerButton(button: .left, isDown: true))
@@ -139,7 +159,7 @@ private func connectedPair() async throws -> (
 }
 
 @Test func aServerMessageArrivesWholeAtTheClient() async throws {
-    let (server, client, listener) = try await connectedPair()
+    let (server, client, listener, _) = try await connectedPair()
     defer { listener.cancel() }
 
     let sent = ServerMessage.helloAck(protocolVersion: 1, accessibilityGranted: false)
@@ -148,6 +168,45 @@ private func connectedPair() async throws -> (
     var iterator = await client.incoming.makeAsyncIterator()
     let frame = await iterator.next()
     #expect(try ServerMessageCodec.decode(#require(frame)) == sent)
+
+    await client.cancel()
+    await server.cancel()
+}
+
+@Test func aFramingErrorFinishesTheIncomingStream() async throws {
+    // This is the third route to the release-everything seam, alongside a
+    // peer disconnect and a local cancel. A hostile or broken peer that sends
+    // an oversized length prefix must also finish `incoming`, or the Mac
+    // never releases a held button when a malformed peer wedges the wire.
+    let (server, client, listener, rawClient) = try await connectedPair()
+    defer { listener.cancel() }
+
+    // 65537, one byte over FrameParser.maxFrameSize (65536), written directly
+    // to the wire as a raw 4-byte big-endian length prefix. `Framer.frame`
+    // never produces an oversized prefix itself, so the only way to exercise
+    // this path through a real NWConnection is to bypass it.
+    let oversizedLengthPrefix = Data([0x00, 0x01, 0x00, 0x01])
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+        rawClient.send(content: oversizedLengthPrefix, completion: .contentProcessed { error in
+            if let error {
+                continuation.resume(throwing: error)
+            } else {
+                continuation.resume()
+            }
+        })
+    }
+
+    let stream = await server.incoming
+    let result = await firstElement(from: stream, timeoutSeconds: 5)
+
+    switch result {
+    case .some(.none):
+        break  // The stream finished, as required.
+    case .some(.some):
+        Issue.record("expected the stream to finish on an oversized frame, but it yielded data")
+    case .none:
+        Issue.record("timed out waiting for the stream to finish; the framing-error path may not be closing the connection")
+    }
 
     await client.cancel()
     await server.cancel()
