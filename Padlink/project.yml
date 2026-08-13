@@ -2,6 +2,7 @@ name: PadlinkMac
 options:
   deploymentTarget:
     macOS: "15.0"
+    iOS: "18.0"
   createIntermediateGroups: true
 
 packages:
@@ -63,6 +64,76 @@ targets:
         # code signing fails.
         GENERATE_INFOPLIST_FILE: "YES"
 
+  PadlinkPad:
+    type: application
+    platform: iOS
+    sources:
+      - PadlinkPad
+    dependencies:
+      - package: PadlinkCore
+        product: PadlinkCore
+    info:
+      path: PadlinkPad/Info.plist
+      properties:
+        CFBundleName: Padlink
+        CFBundleDisplayName: Padlink
+        # Without this the NWBrowser reports nothing at all, forever, and
+        # with no error. The service type must match Padlink.bonjourServiceType.
+        NSBonjourServices:
+          - _padlink._tcp
+        # iOS asks the local network question exactly once. If the answer is
+        # no, the app can never see the Mac again until the user changes it in
+        # Settings, so the wording has to make the consequence obvious.
+        # `>-` not `>`: a plain folded scalar keeps a trailing newline, which
+        # ends up inside the string iOS shows in the permission alert.
+        NSLocalNetworkUsageDescription: >-
+          Padlink uses your local network to find and connect to your Mac. Without this
+          it cannot see your Mac at all.
+        NSCameraUsageDescription: >-
+          Padlink uses the camera only to scan the pairing code shown on your Mac.
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # An iOS app with no launch screen key runs in compatibility mode: a
+        # letterboxed phone-sized canvas on an iPad. A trackpad that only fills
+        # part of the screen is not the app we are building, so declare an
+        # empty (plain background) launch screen.
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hengkysandy.padlink.pad
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        # 2 is iPad. The plan's orientation key is `~ipad`-suffixed, so an
+        # iPhone build would inherit no supported orientations at all. This
+        # app is iPad-only anyway.
+        TARGETED_DEVICE_FAMILY: "2"
+        # Same reasoning as the Mac target: ad-hoc by default so the project
+        # builds for anyone who clones it, overridden by the `padlink` script
+        # when a team id is configured. Ad-hoc is enough for the simulator;
+        # a physical iPad needs a real team.
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_REQUIRED: "YES"
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: ""
+
+  PadlinkPadTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - PadlinkPadTests
+    dependencies:
+      - target: PadlinkPad
+    settings:
+      base:
+        SWIFT_VERSION: "6.0"
+        # No info: block for this target, so XcodeGen has no plist to
+        # generate a path for. Generate one automatically instead, or
+        # code signing fails.
+        GENERATE_INFOPLIST_FILE: "YES"
+
 schemes:
   PadlinkMac:
     build:
@@ -71,5 +142,15 @@ schemes:
     test:
       targets:
         - PadlinkMacTests
+    run:
+      config: Debug
+
+  PadlinkPad:
+    build:
+      targets:
+        PadlinkPad: all
+    test:
+      targets:
+        - PadlinkPadTests
     run:
       config: Debug

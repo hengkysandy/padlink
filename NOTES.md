@@ -355,3 +355,50 @@ Signing and install changes made this session:
 Still to verify by hand: click, type, scroll, copy and paste, held modifier
 survival, drag to select, quit with a button held, non-US layout, two clients at
 once.
+
+## 2026-08-14 — iPad plan, tasks 1 and 2 (iOS target, MoveThrottle)
+
+Branch `worktree-padlink-mac`. Plan: `docs/superpowers/plans/2026-08-14-padlink-ipad-app.md`.
+
+Task 1, the iOS target:
+
+- `Padlink/project.yml` gained `PadlinkPad` (application, iOS 18.0) and
+  `PadlinkPadTests` (unit test bundle). Both mirror the Mac pair, including
+  `GENERATE_INFOPLIST_FILE: "YES"` on the test target, which has no `info:`
+  block and fails code signing without it.
+- Info.plist keys from the plan: `NSBonjourServices`,
+  `NSLocalNetworkUsageDescription`, `NSCameraUsageDescription`,
+  `UISupportedInterfaceOrientations~ipad`.
+- Three things the plan did not list but the target needs: `UILaunchScreen`
+  (without it iOS runs the app letterboxed in phone compatibility mode),
+  `TARGETED_DEVICE_FAMILY: "2"` (the plan's orientation key is `~ipad`-suffixed,
+  so an iPhone build would inherit no orientations at all), and a `.gitignore`
+  line for the generated `Padlink/PadlinkPad/Info.plist`.
+- Verified: `xcodebuild -scheme PadlinkPad -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M4)' build`
+  reports `** BUILD SUCCEEDED **`. Installed and launched in the simulator; the
+  screenshot shows a full-screen placeholder, so the launch screen key works.
+- Simulator gotcha: a cold simulator answers install with
+  `Application failed preflight checks ... reason: Busy`. Boot it first with
+  `xcrun simctl bootstatus <name> -b`. `./padlink test` now does that.
+
+Task 2, `MoveThrottle`:
+
+- `Padlink/PadlinkPad/MoveThrottle.swift`, 17 tests in `PadlinkPadTests`.
+- Bounds `dtMicros` to `1...65535` and `dx`/`dy` to the `Int16` range *before*
+  any integer conversion, because an out-of-range conversion in Swift traps, and
+  a trap in a touch handler kills the app.
+- Accumulates sub-pixel remainders, returns `nil` on a no-op move.
+- The gap is measured from the last move actually **sent**, not the last event
+  seen. Several accumulated events carry combined distance, so they must carry
+  combined time, or the Mac's acceleration curve reads the finger as moving
+  several times faster than it really was.
+- 11 mutations were introduced one at a time and all 11 were caught. Removing
+  only the upper gap clamp crashed the test runner with `Fatal error: Double
+  value cannot be converted to UInt16 because the result would be greater than
+  UInt16.max`, which is the exact crash the type exists to prevent.
+
+Test counts after this work: Core 107, PadlinkMac 49, PadlinkPadTests 18.
+
+Left untracked on purpose: `Padlink/NOTES.md`, a 6-line duplicate stub written
+by a session-start hook that ran with the working directory set to `Padlink/`
+rather than the repo root. Harmless, but it is not the journal.

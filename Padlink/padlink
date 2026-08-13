@@ -11,7 +11,7 @@
 #   ./padlink paste              pair using the code on the clipboard
 #   ./padlink pair "<url>"       pair with a code you have as text
 #   ./padlink move 200 0         and every other test client command
-#   ./padlink test               run both test suites
+#   ./padlink test               run all three test suites
 #   ./padlink down               quit the app
 
 set -e
@@ -19,6 +19,7 @@ cd "$(dirname "$0")"
 
 APP=".build/Build/Products/Debug/PadlinkMac.app"
 INSTALLED="/Applications/PadlinkMac.app"
+IPAD_SIM="iPad Air 11-inch (M4)"
 
 # A configured Apple team id makes the signature stable across rebuilds, which
 # is what stops macOS dropping the Accessibility permission every time. The file
@@ -95,7 +96,13 @@ case "$1" in
     swift test 2>&1 | tail -1
     echo "=== Mac app ==="
     xcodebuild test -scheme PadlinkMac -destination 'platform=macOS,arch=arm64' 2>&1 \
-      | grep -E "Executed [0-9]+ tests.*seconds|TEST SUCCEEDED|TEST FAILED" | tail -2
+      | grep -E "Executed [0-9]+ tests?.*seconds|TEST SUCCEEDED|TEST FAILED" | tail -2
+    echo "=== iPad app ==="
+    # The simulator can report "Application failed preflight checks" if it is
+    # still booting when the test runner tries to install, so boot it first.
+    xcrun simctl bootstatus "$IPAD_SIM" -b > /dev/null 2>&1 || true
+    xcodebuild test -scheme PadlinkPad -destination "platform=iOS Simulator,name=$IPAD_SIM" 2>&1 \
+      | grep -E "Executed [0-9]+ tests?.*seconds|TEST SUCCEEDED|TEST FAILED" | tail -2
     ;;
 
   "")
