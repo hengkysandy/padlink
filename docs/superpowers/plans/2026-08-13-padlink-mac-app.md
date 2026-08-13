@@ -2056,8 +2056,13 @@ final class PadlinkService: ObservableObject {
         listener?.cancel()
         listener = nil
         acceptedConnections.removeAll()
-        Task { await connection?.cancel() }
+        // Capture before nulling. `Task { }` only runs once `stop()` returns
+        // control to the main actor, so reading `connection` inside the
+        // closure would always see nil and never cancel the live connection,
+        // leaving the socket open after quit. Measured on Task 10.
+        let connectionToStop = connection
         connection = nil
+        Task { await connectionToStop?.cancel() }
         router.releaseEverything()
     }
 
