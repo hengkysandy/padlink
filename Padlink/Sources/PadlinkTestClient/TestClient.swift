@@ -11,6 +11,12 @@ struct StoredPairing: Codable {
 
 enum TestClientError: Error, CustomStringConvertible {
     case notPaired
+    /// The saved pairing exists but cannot be used. Deliberately separate from
+    /// `notPaired`: this tool's whole job is telling one kind of failure from
+    /// another, so it must not blur two of its own. "You never paired" and
+    /// "your saved pairing is broken" send someone looking in different places.
+    case corruptState(String)
+    case couldNotSave(String)
     case badPayload(String)
     case macNotFound
     case usage
@@ -19,6 +25,15 @@ enum TestClientError: Error, CustomStringConvertible {
         switch self {
         case .notPaired:
             return "Not paired. Run: padlink-testclient pair \"<padlink://... url>\""
+        case let .corruptState(detail):
+            return """
+                The saved pairing at \(TestClient.stateURL.path) exists but cannot be \
+                used: \(detail).
+                This is a problem with the test client's own state, not with the Mac \
+                or the network. Pair again to replace it.
+                """
+        case let .couldNotSave(path):
+            return "Could not write the pairing file at \(path)."
         case let .badPayload(detail):
             return "Could not read the pairing URL: \(detail)"
         case .macNotFound:
@@ -86,23 +101,54 @@ enum TestClient {
             secret: payload.secret.bytes,
             serviceName: payload.serviceName
         )
-        try JSONEncoder().encode(stored).write(to: stateURL)
-        // The default file mode is 0644, which leaves a real pre-shared key
-        // readable by every account on the machine. Narrow it to owner-only.
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o600],
-            ofItemAtPath: stateURL.path
-        )
+        let encoded = try JSONEncoder().encode(stored)
+
+        // Created with the mode already applied, rather than written and then
+        // narrowed. `Data.write(to:)` creates at 0644, so writing first and
+        // calling `chmod` second leaves a window, however brief, in which a real
+        // pre-shared key sits on disk readable by every account on this machine.
+        // `createFile` applies the mode at open() time, so no such window exists.
+        //
+        // Verified: `createFile` also reapplies the mode when the file already
+        // exists, so a file left at 0644 by an older build is tightened back to
+        // 0600 on the next pairing rather than keeping its looser mode.
+        guard FileManager.default.createFile(
+            atPath: stateURL.path,
+            contents: encoded,
+            attributes: [.posixPermissions: 0o600]
+        ) else {
+            throw TestClientError.couldNotSave(stateURL.path)
+        }
+
         // Never print the secret itself.
         print("Paired with \(payload.macName). Saved to \(stateURL.path)")
     }
 
     static func loadPairing() throws -> (psk: TLSPSK, serviceName: String) {
-        guard let data = try? Data(contentsOf: stateURL),
-              let stored = try? JSONDecoder().decode(StoredPairing.self, from: data),
-              let id = PairingID(hexString: stored.id),
-              let secret = PairingSecret(bytes: stored.secret)
-        else { throw TestClientError.notPaired }
+        // Absence is checked on its own, first. Past this point the file exists,
+        // so every remaining failure means the saved pairing is broken rather
+        // than missing, and each one says which.
+        //
+        // None of these messages may quote the file's contents, because those
+        // contents are the key.
+        guard FileManager.default.fileExists(atPath: stateURL.path) else {
+            throw TestClientError.notPaired
+        }
+
+        guard let data = try? Data(contentsOf: stateURL) else {
+            throw TestClientError.corruptState("the file could not be read")
+        }
+        guard let stored = try? JSONDecoder().decode(StoredPairing.self, from: data) else {
+            throw TestClientError.corruptState("the JSON is malformed or has the wrong shape")
+        }
+        guard let id = PairingID(hexString: stored.id) else {
+            throw TestClientError.corruptState("the pairing id is not valid hex")
+        }
+        guard let secret = PairingSecret(bytes: stored.secret) else {
+            throw TestClientError.corruptState(
+                "the key is not \(PairingSecret.byteCount) bytes"
+            )
+        }
 
         return (TLSPSK(identity: id.bytes, key: secret.bytes), stored.serviceName)
     }
@@ -123,12 +169,60 @@ enum TestClient {
             protocolVersion: Padlink.protocolVersion,
             deviceName: "padlink-testclient"
         ))
+
+        // Wait for the Mac's acknowledgement before sending anything else.
+        //
+        // Sending only proves the bytes reached the local socket. It does not
+        // prove the Mac did anything with them. The one failure that matters
+        // most here is invisible from this side: without Accessibility
+        // permission macOS silently discards every synthesized event, so the
+        // commands below would all report success while nothing whatsoever
+        // happens on screen. That is the most likely cause of "I ran it and the
+        // cursor did not move", and the Mac already tells us in `helloAck`.
+        await warnIfMacCannotAct(connection)
+
         for message in messages {
             try await connection.send(message)
         }
         // Give the Mac a moment to post the events before the socket closes.
         try await Task.sleep(for: .milliseconds(200))
         await connection.cancel()
+    }
+
+    /// Reads the Mac's `helloAck` and complains loudly if it reports that
+    /// Accessibility is not granted.
+    ///
+    /// Never throws. A Mac that stays silent is not worth blocking on: the
+    /// commands may still work, and the timeout keeps a missing reply from
+    /// hanging the tool forever.
+    private static func warnIfMacCannotAct(_ connection: PadlinkConnection) async {
+        let ack = await withTaskGroup(of: ServerMessage?.self) { group in
+            group.addTask {
+                for await frame in await connection.incoming {
+                    if let message = try? ServerMessageCodec.decode(frame) { return message }
+                }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(2))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+
+        guard case let .helloAck(_, accessibilityGranted) = ack else { return }
+        guard !accessibilityGranted else { return }
+
+        FileHandle.standardError.write(Data("""
+            Warning: the Mac reports that Accessibility permission is NOT granted.
+            It will accept these messages and then discard every one of them, so \
+            nothing will move or type. This is macOS refusing, not Padlink failing.
+            Fix: System Settings > Privacy & Security > Accessibility, then enable \
+            PadlinkMac.
+
+            """.utf8))
     }
 
     private static func findMac(named serviceName: String) async throws -> NWEndpoint {
