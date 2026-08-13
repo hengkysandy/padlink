@@ -5,12 +5,25 @@ public struct PairingRecord: Sendable, Equatable {
     public let secret: PairingSecret
     /// The other device's name, shown in the paired-devices list.
     public let peerName: String
+    /// The Bonjour service instance name the iPad used to find this Mac, from
+    /// `PairingPayload.serviceName`. Lets the iPad reconnect to the same Mac
+    /// after a restart when several Macs are advertising. Nil on the Mac's
+    /// side of the pairing, since a paired iPad has no Bonjour service name
+    /// of its own.
+    public let serviceName: String?
     public let pairedAt: Date
 
-    public init(id: PairingID, secret: PairingSecret, peerName: String, pairedAt: Date) {
+    public init(
+        id: PairingID,
+        secret: PairingSecret,
+        peerName: String,
+        serviceName: String?,
+        pairedAt: Date
+    ) {
         self.id = id
         self.secret = secret
         self.peerName = peerName
+        self.serviceName = serviceName
         self.pairedAt = pairedAt
     }
 }

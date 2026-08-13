@@ -2,11 +2,12 @@ import Foundation
 import Testing
 @testable import PadlinkCore
 
-private func record(_ byte: UInt8, name: String) -> PairingRecord {
+private func record(_ byte: UInt8, name: String, serviceName: String? = "Hengky MacBook Air") -> PairingRecord {
     PairingRecord(
         id: PairingID(bytes: Data(repeating: byte, count: 8))!,
         secret: PairingSecret(bytes: Data(repeating: byte, count: 32))!,
         peerName: name,
+        serviceName: serviceName,
         pairedAt: Date(timeIntervalSince1970: 1_770_000_000)
     )
 }
@@ -16,6 +17,15 @@ private func record(_ byte: UInt8, name: String) -> PairingRecord {
     let saved = record(1, name: "iPad Air")
     try store.save(saved)
     #expect(try store.load(id: saved.id) == saved)
+    #expect(try store.load(id: saved.id)?.serviceName == "Hengky MacBook Air")
+}
+
+@Test func savesAndLoadsARecordWithNoServiceName() throws {
+    // The Mac's side of a pairing has no Bonjour service name of its own.
+    let store = InMemoryPairingStore()
+    let saved = record(7, name: "iPad Pro", serviceName: nil)
+    try store.save(saved)
+    #expect(try store.load(id: saved.id)?.serviceName == nil)
 }
 
 @Test func loadingAnUnknownIDReturnsNil() throws {
@@ -31,6 +41,7 @@ private func record(_ byte: UInt8, name: String) -> PairingRecord {
         id: first.id,
         secret: first.secret,
         peerName: "new name",
+        serviceName: first.serviceName,
         pairedAt: first.pairedAt
     )
     try store.save(first)
@@ -45,6 +56,7 @@ private func record(_ byte: UInt8, name: String) -> PairingRecord {
         id: PairingID(bytes: Data(repeating: 4, count: 8))!,
         secret: PairingSecret(bytes: Data(repeating: 4, count: 32))!,
         peerName: "newer",
+        serviceName: "Hengky MacBook Air",
         pairedAt: Date(timeIntervalSince1970: 1_780_000_000)
     )
     try store.save(newer)

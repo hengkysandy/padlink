@@ -45,6 +45,13 @@ private func makePayload(
     #expect(PairingID(hexString: "deadbeef") == nil)
 }
 
+@Test func pairingIDRejectsSignCharacters() {
+    // `UInt8("+1", radix: 16)` parses to 1, so without an explicit character
+    // check this string would decode as a valid (wrong) id instead of being
+    // rejected, and the hex round trip would not be injective.
+    #expect(PairingID(hexString: "+1+2+3+4+5+6+7+8") == nil)
+}
+
 @Test func payloadRoundTrips() throws {
     let payload = makePayload()
     let parsed = try PairingPayload.parse(payload.urlString)
@@ -101,6 +108,22 @@ private func makePayload(
     let broken = url.replacingOccurrences(
         of: url.split(separator: "&").first { $0.hasPrefix("k=") }!,
         with: "k=tooshort"
+    )
+    #expect(throws: PairingError.malformedField("k")) {
+        _ = try PairingPayload.parse(broken)
+    }
+}
+
+@Test func parseRejectsBase64URLWithRemainderOne() {
+    // `decodeBase64URL` correctly rejects a remainder-1 input, but the
+    // malformed-secret test above uses "tooshort" (8 characters, remainder
+    // 0), which is caught by the length check before padding even matters.
+    // Without this test, a padding refactor could silently break remainder 1
+    // with nothing failing.
+    let url = makePayload().urlString
+    let broken = url.replacingOccurrences(
+        of: url.split(separator: "&").first { $0.hasPrefix("k=") }!,
+        with: "k=aaaaaaaaa"  // 9 characters: length % 4 == 1
     )
     #expect(throws: PairingError.malformedField("k")) {
         _ = try PairingPayload.parse(broken)

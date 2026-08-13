@@ -39,6 +39,12 @@ public struct PairingID: Sendable, Hashable {
 
     public init?(hexString: String) {
         guard hexString.count == Self.byteCount * 2 else { return nil }
+        // `UInt8("+1", radix: 16)` parses to 1: Swift's radix-based integer
+        // parsing accepts a leading sign character. Left unchecked, that
+        // makes the hex decode non-injective (several inputs decode to the
+        // same bytes), so every character is checked against the hex digit
+        // set before any parsing happens.
+        guard hexString.allSatisfy(\.isHexDigit) else { return nil }
         var data = Data(capacity: Self.byteCount)
         var index = hexString.startIndex
         while index < hexString.endIndex {
