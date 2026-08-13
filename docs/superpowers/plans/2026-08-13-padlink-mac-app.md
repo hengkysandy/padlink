@@ -986,7 +986,9 @@ git commit -m "Add the input synthesis seam and its CGEvent implementation"
 - Test: `Padlink/PadlinkMacTests/MessageRouterTests.swift`
 
 **Interfaces:**
-- Consumes: `InputSynthesizing`, `ScreenGeometry`, and from Core: `ClientMessage`, `HeldInputState`, `ReleaseAction`, `PointerAcceleration`, `KeyRouter`, `MacVirtualKeys`, `KeyModifiers`, `PointerButton`.
+- Consumes: `InputSynthesizing`, `ScreenGeometry`, and from Core: `ClientMessage`, `HeldInputState`, `ReleaseAction`, `PointerAcceleration`, `MacVirtualKeys`, `KeyModifiers`, `PointerButton`.
+
+**`KeyRouter` is deliberately absent from that list.** It decides between the unicode path and the key code path, but that decision happens on the **iPad**, before the message is sent. By the time the Mac receives a message the choice is already expressed as `.keyText` versus `.keyCode`, so `MessageRouter` only maps each case to the matching synthesizer call. The Mac never calls `KeyRouter`; the test client in Task 12 does, because it stands in for the iPad.
 - Produces: `final class MessageRouter` with `init(synthesizer: any InputSynthesizing, geometry: ScreenGeometry, acceleration: PointerAcceleration = .default)`, `func handle(_ message: ClientMessage)`, `func releaseEverything()`, and `private(set) var held: HeldInputState`.
 
 This is where every decision lives, and therefore where the real tests are.
@@ -1544,8 +1546,8 @@ final class KeychainPairingStoreTests: XCTestCase {
             id: id,
             secret: secret,
             peerName: name,
-            pairedAt: Date(timeIntervalSince1970: 1_770_000_000),
-            serviceName: serviceName
+            serviceName: serviceName,
+            pairedAt: Date(timeIntervalSince1970: 1_770_000_000)
         )
     }
 
@@ -1575,8 +1577,8 @@ final class KeychainPairingStoreTests: XCTestCase {
             id: first.id,
             secret: first.secret,
             peerName: "new name",
-            pairedAt: first.pairedAt,
-            serviceName: first.serviceName
+            serviceName: first.serviceName,
+            pairedAt: first.pairedAt
         )
         try store.save(second)
 
@@ -1592,8 +1594,8 @@ final class KeychainPairingStoreTests: XCTestCase {
             id: newerID,
             secret: newerSecret,
             peerName: "newer",
-            pairedAt: Date(timeIntervalSince1970: 1_780_000_000),
-            serviceName: nil
+            serviceName: nil,
+            pairedAt: Date(timeIntervalSince1970: 1_780_000_000)
         )
 
         try store.save(newer)
@@ -1714,9 +1716,16 @@ final class KeychainPairingStore: PairingStore {
         return try decode(data, id: id)
     }
 
+    /// Two passes on purpose. Asking for `kSecReturnData` and
+    /// `kSecReturnAttributes` together with `kSecMatchLimitAll` fails with
+    /// `errSecParam` (-50) on the legacy file keychain this app uses. Measured
+    /// on Task 8 with a standalone script, and distinct from the -34018
+    /// entitlement failure the Task 0 spike found.
+    ///
+    /// So: enumerate the accounts with an attributes-only query, then fetch
+    /// each record's data through the single-item `load` path.
     func loadAll() throws -> [PairingRecord] {
         var query = baseQuery(account: nil)
-        query[kSecReturnData as String] = true
         query[kSecReturnAttributes as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitAll
 
@@ -1730,9 +1739,9 @@ final class KeychainPairingStore: PairingStore {
         for item in items {
             guard let account = item[kSecAttrAccount as String] as? String,
                   let id = PairingID(hexString: account),
-                  let data = item[kSecValueData as String] as? Data
+                  let record = try load(id: id)
             else { continue }
-            records.append(try decode(data, id: id))
+            records.append(record)
         }
         return records.sorted { $0.pairedAt < $1.pairedAt }
     }
@@ -1761,8 +1770,8 @@ final class KeychainPairingStore: PairingStore {
             id: id,
             secret: secret,
             peerName: stored.peerName,
-            pairedAt: stored.pairedAt,
-            serviceName: stored.serviceName
+            serviceName: stored.serviceName,
+            pairedAt: stored.pairedAt
         )
     }
 }
@@ -1965,8 +1974,8 @@ final class PadlinkServiceTests: XCTestCase {
             id: id,
             secret: secret,
             peerName: "iPad",
-            pairedAt: Date(),
-            serviceName: nil
+            serviceName: nil,
+            pairedAt: Date()
         ))
 
         let service = makeService(store: store)
@@ -2173,8 +2182,8 @@ final class PadlinkService: ObservableObject {
             id: candidate.payload.pairingID,
             secret: candidate.payload.secret,
             peerName: deviceName,
-            pairedAt: Date(),
-            serviceName: candidate.payload.serviceName
+            serviceName: candidate.payload.serviceName,
+            pairedAt: Date()
         )
         try? store.save(record)
 
@@ -2212,6 +2221,8 @@ git commit -m "Add PadlinkService owning the listener, pairing, and connection"
 - Consumes: `PadlinkService`, `ServiceState`, `AccessibilityStatus`, `QRCodeImage`.
 
 UI has no automated tests here; it is verified by hand in Task 13. Keep the views thin: they read published state and call service methods, nothing more.
+
+**A timer trap Task 7 flagged, which lands here.** `AccessibilityStatus.startPolling()` schedules a default-mode `Timer`. A default-mode timer **pauses while a native `NSMenu` is tracking**, so if the onboarding content ends up inside menu-tracked UI, the polling stalls exactly while the user is looking at it, and the window would not update when they flip the switch. The onboarding below is a separate `Window` scene rather than menu content, so this should not arise. If it does, the fix is to schedule with `RunLoop.current.add(timer, forMode: .common)` in `startPolling()`. Verify by hand in Task 13 that the onboarding window updates without a restart.
 
 - [ ] **Step 1: Write the onboarding view**
 
