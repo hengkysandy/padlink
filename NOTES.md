@@ -402,3 +402,60 @@ Test counts after this work: Core 107, PadlinkMac 49, PadlinkPadTests 18.
 Left untracked on purpose: `Padlink/NOTES.md`, a 6-line duplicate stub written
 by a session-start hook that ran with the working directory set to `Padlink/`
 rather than the repo root. Harmless, but it is not the journal.
+
+## 2026-08-14 — iPad app installed and launching on the physical device
+
+Placeholder only: it shows the app name and the protocol version. No networking yet.
+The point was proving the install chain, not the app.
+
+Chain now verified end to end on the real iPad (iPad Air 5, iPadOS 26.5.2):
+certificate valid to Aug 2027, device registered with the team, signed device build,
+install via `devicectl`, trust gate passed, app launches.
+
+Two things learned that would have cost time later:
+
+- **Building against `generic/platform=iOS` does not register the device with Apple.**
+  It fails with "your team has no devices from which to generate a provisioning
+  profile". Building against the specific device id registers it and succeeds. Good
+  thing to discover with a placeholder rather than a finished app.
+- **The "Untrusted Developer" dialog is per certificate, not per app**, and offers only
+  Cancel. The trust switch lives in Settings > General > VPN & Device Management. It
+  will not reappear for later builds.
+
+Working device install command, for reuse:
+
+```
+xcodebuild -scheme PadlinkPad -configuration Debug \
+  -destination 'id=<device-id>' -derivedDataPath .build-device \
+  CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=<team> \
+  CODE_SIGN_IDENTITY="Apple Development" -allowProvisioningUpdates build
+xcrun devicectl device install app --device <device-id> \
+  .build-device/Build/Products/Debug-iphoneos/PadlinkPad.app
+```
+
+Tasks 1 and 2 complete (6ccfcdc): iOS target with all four plist keys, and
+`MoveThrottle`, which clamps the `dtMicros` value that would otherwise trap and kill
+the app when a finger pauses mid-drag. 11 mutations, all caught, 3 of them killing the
+process exactly as the real bug would.
+
+Four more plan defects found by the implementer, the notable one being a missing
+`UILaunchScreen` key: without it the app runs letterboxed in phone compatibility mode
+on an iPad. My plan's only check for that task was "does it build", which it did,
+perfectly, while looking wrong. Caught by taking a screenshot instead of trusting the
+build result.
+
+Suites: Core 107, PadlinkMac 49, PadlinkPadTests 18.
+
+## TODO when resuming
+
+1. Tasks 3-5 (MacBrowser, PadPairingStore, PadService) were dispatched and may have
+   landed. Check `git log` and `.superpowers/sdd/ipad-task-3-5-report.md` first.
+2. Then Task 6, `TrackpadView`, which is the actual point of the app.
+3. Then Tasks 7-8: QR scanning plus a paste field (the simulator has no camera, so the
+   paste field is the development path, not a fallback), and the main screen wiring.
+4. Test in the simulator first: it shares the Mac's network so Bonjour works. Then the
+   physical iPad for real multi-touch and the camera.
+5. Mac app still has unfinished hand checks: click, type, scroll, copy and paste, held
+   modifier survival, drag to select, quit with a button held, non-US layout, two
+   clients at once. The coordinate check is done and verified by measurement.
+6. Then: whole-branch review, merge to main, push.
