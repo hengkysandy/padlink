@@ -120,8 +120,9 @@ private func handshakeSucceeds(psk clientPSK: TLSPSK, port: NWEndpoint.Port) asy
     // Plain PSK suites (0x00A8, 0x00A9, 0xCCAB) complete a handshake but give
     // no forward secrecy. If one ever appears in this list, a captured
     // recording becomes decryptable once the secret leaks.
-    let pinned = PadlinkTransport.forwardSecretPSKCiphersuites.map(\.rawValue)
+    let pinned = PadlinkTransport.forwardSecretPSKCiphersuites
     #expect(pinned.isEmpty == false)
+    #expect(Set(pinned) == Set<UInt16>([0xD001, 0xCCAC, 0x00AA]))
     for plainPSK: UInt16 in [0x00A8, 0x00A9, 0xCCAB] {
         #expect(pinned.contains(plainPSK) == false)
     }

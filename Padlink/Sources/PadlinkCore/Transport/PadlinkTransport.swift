@@ -1,17 +1,17 @@
 import Foundation
 import Network
 
-public enum PadlinkTransport {
-    /// Forward-secret PSK ciphersuites. `tls_ciphersuite_t` exposes no PSK
-    /// cases, but it is UInt16-backed, so they are built by raw value.
+public enum PadlinkTransport: Sendable {
+    /// Forward-secret PSK ciphersuites, as raw values.
     ///
-    /// Only ephemeral-Diffie-Hellman suites appear here. Plain PSK suites such
-    /// as 0x00A8 also work but have no forward secrecy, which would break the
-    /// spec's promise that a captured recording cannot be decrypted later.
-    static let forwardSecretPSKCiphersuites: [tls_ciphersuite_t] = [
-        tls_ciphersuite_t(rawValue: 0xD001)!,  // ECDHE_PSK_WITH_AES_128_GCM_SHA256
-        tls_ciphersuite_t(rawValue: 0xCCAC)!,  // ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256
-        tls_ciphersuite_t(rawValue: 0x00AA)!   // DHE_PSK_WITH_AES_128_GCM_SHA256
+    /// `tls_ciphersuite_t` exposes no PSK cases, so these are given by raw value.
+    /// Only ephemeral-Diffie-Hellman suites appear here. Plain PSK suites such as
+    /// 0x00A8 also complete a handshake but have no forward secrecy, which would
+    /// break the promise that a captured recording cannot be decrypted later.
+    static let forwardSecretPSKCiphersuites: [UInt16] = [
+        0xD001,  // ECDHE_PSK_WITH_AES_128_GCM_SHA256
+        0xCCAC,  // ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256
+        0x00AA   // DHE_PSK_WITH_AES_128_GCM_SHA256
     ]
 
     /// TLS 1.2 with forward-secret pre-shared keys, and Nagle disabled.
@@ -30,7 +30,12 @@ public enum PadlinkTransport {
         let security = options.securityProtocolOptions
         sec_protocol_options_set_min_tls_protocol_version(security, .TLSv12)
         sec_protocol_options_set_max_tls_protocol_version(security, .TLSv12)
-        for suite in forwardSecretPSKCiphersuites {
+        for rawValue in forwardSecretPSKCiphersuites {
+            guard let suite = tls_ciphersuite_t(rawValue: rawValue) else {
+                preconditionFailure(
+                    "Ciphersuite 0x\(String(rawValue, radix: 16)) is not representable as tls_ciphersuite_t"
+                )
+            }
             sec_protocol_options_append_tls_ciphersuite(security, suite)
         }
         for psk in psks {
