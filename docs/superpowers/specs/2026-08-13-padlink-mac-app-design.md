@@ -322,13 +322,19 @@ jumps. Direction follows a constant for now; the settings toggle is deferred.
 
 ### Typing
 
-Two paths, decided by `KeyRouter` in Core:
+Two paths. **The choice is made on the iPad, not here.** `KeyRouter` in Core decides, and by
+the time a message reaches the Mac the decision is already expressed as which message case
+arrived. The Mac only maps each case to the matching `CGEvent` call, and never calls
+`KeyRouter` itself.
 
-1. **Plain text** (no modifier, or shift only) goes through a `CGEvent` with virtual key `0`
-   and `keyboardSetUnicodeString`. Layout independent, and handles accents, emoji, and
-   non-Latin scripts with no work here.
-2. **Shortcuts and special keys** use the real virtual key code from `MacVirtualKeys`, with
-   `event.flags` set from the message's modifiers.
+1. **`.keyText`**, sent when the iPad saw no modifier or shift only, goes through a
+   `CGEvent` with virtual key `0` and `keyboardSetUnicodeString`. Layout independent, and
+   handles accents, emoji, and non-Latin scripts with no work here.
+2. **`.keyCode`**, sent for shortcuts and special keys, uses the real virtual key code from
+   `MacVirtualKeys`, with `event.flags` set from the message's modifiers.
+
+This split is why the wire format carries two distinct message types rather than one string:
+the layout-dependent decision belongs where the keyboard layout is known.
 
 ### Standalone modifiers
 

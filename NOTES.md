@@ -265,3 +265,5 @@ Plan 2 (macOS app) and Plan 3 (iPadOS app) get written after Core is verified.
   Info.plist file." Added that setting to get a build; not otherwise
   material to the Keychain finding.
 - Spike code deleted after recording this result, per plan.
+
+## 2026-08-13 15:02 — (auto session marker)
