@@ -435,9 +435,11 @@ git commit -m "Add HeldInputState so a dropped connection releases held input"
 
 This task's deliverable is the build system working end to end. Its test is deliberately trivial: it proves the target exists, links Core, and can run tests, which is the thing that actually breaks.
 
-**A build failure the Task 0 spike already hit, so you do not have to.** Its `project.yml` had no `info:` block, so the target had neither a generated Info.plist nor a path to one, and the build failed at code signing. The `project.yml` below **does** have an `info:` block, which makes XcodeGen generate the plist at that path. Do not also hand-write that file: XcodeGen overwrites it.
+**A build failure the Task 0 spike already hit, so you do not have to.** Its `project.yml` had no `info:` block, so the target had neither a generated Info.plist nor a path to one, and the build failed at code signing.
 
-If you still hit a signing or Info.plist error, add `GENERATE_INFOPLIST_FILE: "YES"` to the target's `settings.base` and say so in your report.
+**Both targets need a plist, by different routes.** `PadlinkMac` gets one from its `info:` block, which makes XcodeGen generate the file at that path. Do not also hand-write it: XcodeGen overwrites it. `PadlinkMacTests` has no `info:` block, so it carries `GENERATE_INFOPLIST_FILE: "YES"` instead and lets Xcode synthesize one. Both are already in the `project.yml` below.
+
+If you still hit a signing or Info.plist error on either target, add `GENERATE_INFOPLIST_FILE: "YES"` to that target's `settings.base` and say so in your report.
 
 - [ ] **Step 1: Ignore the generated project and plist**
 
@@ -501,6 +503,10 @@ targets:
     settings:
       base:
         SWIFT_VERSION: "6.0"
+        # A test bundle needs an Info.plist too, and this target has no
+        # `info:` block to generate one from. Without this it fails at code
+        # signing with "target has no Info.plist". Measured on this task.
+        GENERATE_INFOPLIST_FILE: "YES"
 
 schemes:
   PadlinkMac:
