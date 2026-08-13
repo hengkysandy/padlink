@@ -29,13 +29,12 @@ private func connectedPair() async throws -> (
     let port: NWEndpoint.Port = try await withCheckedThrowingContinuation { continuation in
         let resumed = Box(false)
         listener.stateUpdateHandler = { state in
-            guard !resumed.value else { return }
             switch state {
             case .ready:
-                resumed.value = true
+                guard resumed.claim() else { return }
                 continuation.resume(returning: listener.port!)
             case .failed(let error):
-                resumed.value = true
+                guard resumed.claim() else { return }
                 continuation.resume(throwing: error)
             default:
                 break
@@ -86,14 +85,12 @@ private func firstElement(
         Task {
             var iterator = stream.makeAsyncIterator()
             let value = await iterator.next()
-            guard !resumed.value else { return }
-            resumed.value = true
+            guard resumed.claim() else { return }
             continuation.resume(returning: .some(value))
         }
         Task {
             try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
-            guard !resumed.value else { return }
-            resumed.value = true
+            guard resumed.claim() else { return }
             continuation.resume(returning: .none)
         }
     }
@@ -154,6 +151,7 @@ private func firstElement(
     // The stream must finish rather than hang forever.
     let finished = await iterator.next()
     #expect(finished == nil)
+    #expect(await server.closeReason == .peerClosed)
 
     await server.cancel()
 }
@@ -168,6 +166,26 @@ private func firstElement(
     var iterator = await client.incoming.makeAsyncIterator()
     let frame = await iterator.next()
     #expect(try ServerMessageCodec.decode(#require(frame)) == sent)
+
+    await client.cancel()
+    await server.cancel()
+}
+
+@Test func sendingAnOversizedKeyTextThrowsInsteadOfDisconnecting() async throws {
+    // A `.keyText` at ByteWriter's own limit (UInt16.max UTF-8 bytes) encodes
+    // to a payload of 1 (type byte) + 2 (length prefix) + 65535 = 65538
+    // bytes, one type byte and one length prefix over FrameParser.maxFrameSize
+    // (65536). Without the guard in `sendFrame`, this would frame and send
+    // successfully, then the receiving FrameParser would throw
+    // `frameTooLarge` and the connection would silently die instead of this
+    // call throwing.
+    let (server, client, listener, _) = try await connectedPair()
+    defer { listener.cancel() }
+
+    let hugeText = String(repeating: "a", count: Int(UInt16.max))
+    await #expect(throws: ConnectionError.messageTooLarge(65_538)) {
+        try await client.send(.keyText(hugeText))
+    }
 
     await client.cancel()
     await server.cancel()
@@ -207,6 +225,7 @@ private func firstElement(
     case .none:
         Issue.record("timed out waiting for the stream to finish; the framing-error path may not be closing the connection")
     }
+    #expect(await server.closeReason == .framingViolation)
 
     await client.cancel()
     await server.cancel()

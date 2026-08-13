@@ -53,3 +53,13 @@ import Testing
         _ = try reader.readString()
     }
 }
+
+@Test func writeStringThrowsStringTooLongOverTheLimit() {
+    // UInt16's length prefix can express at most UInt16.max bytes. One more
+    // byte than that must be rejected rather than silently truncated.
+    let overLong = String(repeating: "a", count: Int(UInt16.max) + 1)
+    var writer = ByteWriter()
+    #expect(throws: CodecError.stringTooLong) {
+        try writer.writeString(overLong)
+    }
+}
