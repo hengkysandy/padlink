@@ -317,3 +317,41 @@ Padlink iPad app exists.
 Still to verify by hand: the down-not-up coordinate check, click, type, scroll, copy and
 paste, held modifier survival, drag to select, quit with a button held, non-US layout,
 and two clients at once.
+
+## 2026-08-14 — Coordinate check verified by measurement
+
+Measured rather than eyeballed: read the cursor position, sent the move, read it
+again. `NSEvent.mouseLocation` is bottom-left origin, so the script prints the
+top-left equivalent too, to remove any chance of misreading the sign.
+
+- `move 0 200`: topLeftY 405 -> 805. Increasing top-left Y is downward. Correct.
+- `move 10 0`: x 378 -> 398. Increasing x is rightward. Correct.
+
+Both moves appeared to be amplified exactly 2x, which looked like a Retina point
+versus pixel scaling bug. It was not, and the arithmetic shows two different
+mechanisms that coincidentally agreed:
+
+- `move 10 0`: 10px in 16.7ms is 600 px/s. gain = 1.0 + 0.0018*600 = 2.08.
+  Output 10 * 2.08 = 20.8. Measured 20.
+- `move 0 200`: 12000 px/s, so gain hits its 6.0 ceiling giving 1200, which then
+  hits the separate `maxOutputPerEvent` cap of 400. Measured 400.
+
+Lesson worth keeping: a suspicious round number is a reason to check the formula,
+not a reason to assume a bug. I nearly recorded a scaling defect that does not
+exist.
+
+Signing and install changes made this session:
+
+- Ad-hoc signing was the root cause of Accessibility permission dropping on every
+  rebuild, because the signature changed each time. Now signed with a real Apple
+  Development identity, verified with `codesign -dvvv`: TeamIdentifier matches the
+  configured team and the chain reaches Apple Root CA. The team id lives in a
+  gitignored `.padlink-team`, confirmed with `git check-ignore`.
+- The app is installed to `/Applications` and launched from there. Running from
+  the build directory had two problems: it sits inside two dot-folders, so Finder
+  will not show it in the Accessibility file picker at all, and a clean build
+  deletes it, which silently invalidates the permission later.
+
+Still to verify by hand: click, type, scroll, copy and paste, held modifier
+survival, drag to select, quit with a button held, non-US layout, two clients at
+once.

@@ -6,8 +6,10 @@
 # not need while testing, so this script resolves its own location and does the
 # right thing from anywhere.
 #
+#   ./padlink team <ID>          set your Apple team id, once
 #   ./padlink up                 build and launch the Mac app
-#   ./padlink pair "<url>"       pair the test client
+#   ./padlink paste              pair using the code on the clipboard
+#   ./padlink pair "<url>"       pair with a code you have as text
 #   ./padlink move 200 0         and every other test client command
 #   ./padlink test               run both test suites
 #   ./padlink down               quit the app
@@ -16,24 +18,56 @@ set -e
 cd "$(dirname "$0")"
 
 APP=".build/Build/Products/Debug/PadlinkMac.app"
+INSTALLED="/Applications/PadlinkMac.app"
+
+# A configured Apple team id makes the signature stable across rebuilds, which
+# is what stops macOS dropping the Accessibility permission every time. The file
+# is gitignored: a team id is account-specific and this repository is public.
+SIGNING=()
+if [ -f .padlink-team ]; then
+  TEAM="$(tr -d '[:space:]' < .padlink-team)"
+  if [ -n "$TEAM" ]; then
+    SIGNING=(CODE_SIGN_STYLE=Automatic "DEVELOPMENT_TEAM=$TEAM" \
+             CODE_SIGN_IDENTITY="Apple Development" -allowProvisioningUpdates)
+  fi
+fi
 
 case "$1" in
+  team)
+    if [ -z "$2" ]; then
+      echo "Usage: ./padlink team <YOUR_TEAM_ID>"
+      echo ""
+      echo "Find it in Xcode: Settings > Accounts > pick your Apple ID,"
+      echo "then look at the Team column. It is 10 characters, like A1B2C3D4E5."
+      [ -f .padlink-team ] && echo "" && echo "Currently set to: $(cat .padlink-team)"
+      exit 1
+    fi
+    echo "$2" > .padlink-team
+    echo "Saved. Rebuilds now keep the same signature, so Accessibility"
+    echo "permission should stop dropping. Run: ./padlink up"
+    ;;
+
   up)
     echo "Building..."
+    [ ${#SIGNING[@]} -eq 0 ] && echo "(ad-hoc signing: expect to re-grant Accessibility after this build)"
     xcodebuild -scheme PadlinkMac -configuration Debug \
-      -derivedDataPath .build build -quiet 2>&1 | grep -v "^--- xcodebuild: WARNING" || true
-    # A rebuild produces a new binary, and macOS ties Accessibility permission to
-    # the exact binary. An old copy still running would keep the old permission
-    # and quietly serve stale code, so always replace it.
+      -derivedDataPath .build "${SIGNING[@]}" build -quiet 2>&1 \
+      | grep -v "^--- xcodebuild: WARNING" || true
     osascript -e 'quit app "PadlinkMac"' 2>/dev/null || true
     sleep 1
-    open "$APP"
+
+    # Install to /Applications and run from there, rather than running straight
+    # out of the build directory. Two reasons, both learned the hard way:
+    # the build directory sits inside two dot-folders, so Finder will not show
+    # it in the Accessibility file picker; and a clean build deletes it, which
+    # silently invalidates the permission and makes the app look broken.
+    # A stable path keeps the grant attached to something that persists.
+    rm -rf "$INSTALLED"
+    cp -R "$APP" /Applications/
+    open "$INSTALLED"
     echo ""
-    echo "Launched. Look for the keyboard icon in your menu bar, top right."
-    echo ""
-    echo "If this is the first launch after a rebuild, macOS has dropped"
-    echo "Accessibility permission. Re-grant it, or nothing will move:"
-    echo "  System Settings > Privacy & Security > Accessibility > PadlinkMac"
+    echo "Launched from $INSTALLED"
+    echo "Look for the keyboard icon in your menu bar, top right."
     ;;
 
   down)

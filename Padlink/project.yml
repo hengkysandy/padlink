@@ -30,8 +30,19 @@ targets:
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
-        # Ad-hoc signing for local development. Release builds use a
-        # Developer ID identity and notarization instead.
+        # Ad-hoc signing is the default so the project builds for anyone who
+        # clones it, with no Apple account required.
+        #
+        # It has one real cost: ad-hoc produces a different signature on every
+        # build, so macOS treats each build as a brand new app and drops the
+        # Accessibility permission. That permission is what lets Padlink move
+        # the cursor at all, so re-granting it after every rebuild is the single
+        # most annoying part of developing this app.
+        #
+        # The `padlink` script overrides these on the command line when a team
+        # id is configured, which keeps the signature stable and the permission
+        # granted. The team id is account-specific, so it lives in a gitignored
+        # file rather than here. See `padlink team`.
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGNING_REQUIRED: "YES"
         CODE_SIGN_STYLE: Manual

@@ -38,3 +38,6 @@ Padlink/PadlinkMac/Info.plist
 # Test client pairing state. Holds a real pre-shared key.
 # No slash, so this matches at any depth, not just the repo root.
 .padlink-testclient.json
+
+# Apple team id for local signing. Account-specific, not for a public repo.
+.padlink-team
