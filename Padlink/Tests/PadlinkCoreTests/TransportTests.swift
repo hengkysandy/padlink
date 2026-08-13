@@ -8,6 +8,7 @@ private func psk(_ byte: UInt8) -> TLSPSK {
         id: PairingID(bytes: Data(repeating: byte, count: 8))!,
         secret: PairingSecret(bytes: Data(repeating: byte, count: 32))!,
         peerName: "test",
+        serviceName: "Hengky MacBook Air",
         pairedAt: Date()
     ))
 }
@@ -28,13 +29,12 @@ private func startListener(
     let port: NWEndpoint.Port = try await withCheckedThrowingContinuation { continuation in
         let resumed = Box(false)
         listener.stateUpdateHandler = { state in
-            guard !resumed.value else { return }
             switch state {
             case .ready:
-                resumed.value = true
+                guard resumed.claim() else { return }
                 continuation.resume(returning: listener.port!)
             case .failed(let error):
-                resumed.value = true
+                guard resumed.claim() else { return }
                 continuation.resume(throwing: error)
             default:
                 break
@@ -61,13 +61,12 @@ private func handshakeSucceeds(psk clientPSK: TLSPSK, port: NWEndpoint.Port) asy
     return await withCheckedContinuation { continuation in
         let resumed = Box(false)
         connection.stateUpdateHandler = { state in
-            guard !resumed.value else { return }
             switch state {
             case .ready:
-                resumed.value = true
+                guard resumed.claim() else { return }
                 continuation.resume(returning: true)
             case .failed, .cancelled, .waiting:
-                resumed.value = true
+                guard resumed.claim() else { return }
                 continuation.resume(returning: false)
             default:
                 break
@@ -80,7 +79,49 @@ private func handshakeSucceeds(psk clientPSK: TLSPSK, port: NWEndpoint.Port) asy
 @Test func matchingPreSharedKeyCompletesTheHandshake() async throws {
     let (listener, port, accepted) = try await startListener(psks: [psk(0xA1)])
     defer { listener.cancel() }
-    #expect(await handshakeSucceeds(psk: psk(0xA1), port: port))
+
+    let connection = NWConnection(
+        host: "127.0.0.1",
+        port: port,
+        using: PadlinkTransport.connectionParameters(psk: psk(0xA1))
+    )
+    defer { connection.cancel() }
+
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+        let resumed = Box(false)
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                guard resumed.claim() else { return }
+                continuation.resume()
+            case .failed(let error):
+                guard resumed.claim() else { return }
+                continuation.resume(throwing: error)
+            case .cancelled, .waiting:
+                guard resumed.claim() else { return }
+                continuation.resume(throwing: CancellationError())
+            default:
+                break
+            }
+        }
+        connection.start(queue: .global())
+    }
+
+    // The pinning test below only proves the constant list is right. This
+    // proves the live handshake actually lands on one of those suites, which
+    // is what the forward-secrecy promise depends on: that a leaked secret
+    // cannot decrypt an old recording.
+    guard let metadata = connection.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata else {
+        Issue.record("ready connection has no TLS metadata")
+        return
+    }
+    let security = metadata.securityProtocolMetadata
+    let negotiatedSuite = sec_protocol_metadata_get_negotiated_tls_ciphersuite(security)
+    #expect(PadlinkTransport.forwardSecretPSKCiphersuites.contains(negotiatedSuite.rawValue))
+
+    let negotiatedVersion = sec_protocol_metadata_get_negotiated_tls_protocol_version(security)
+    #expect(negotiatedVersion == .TLSv12)
+
     _ = accepted  // keep the retaining box alive to the end of the test
 }
 
@@ -128,6 +169,7 @@ private func handshakeSucceeds(psk clientPSK: TLSPSK, port: NWEndpoint.Port) asy
         id: PairingID(bytes: Data([1, 2, 3, 4, 5, 6, 7, 8]))!,
         secret: PairingSecret(bytes: Data(repeating: 0x33, count: 32))!,
         peerName: "iPad",
+        serviceName: nil,
         pairedAt: Date()
     )
     let converted = TLSPSK(record: record)

@@ -56,7 +56,11 @@ public enum PadlinkTransport: Sendable {
         let tcp = NWProtocolTCP.Options()
         // Every pointer move is a small packet. Nagle would buffer them.
         tcp.noDelay = true
-        // Notice a dead peer in seconds rather than minutes.
+        // A backstop, not the real dead-peer detection: Darwin's default
+        // probe interval (75s) and probe count (8) put actual TCP-level
+        // detection closer to ten minutes even with keepaliveIdle this low.
+        // The app-level heartbeat is what actually notices a dead peer in
+        // seconds.
         tcp.enableKeepalive = true
         tcp.keepaliveIdle = 2
 
