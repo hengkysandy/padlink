@@ -223,8 +223,19 @@ Plan 2 (macOS app) and Plan 3 (iPadOS app) get written after Core is verified.
 - **`HeartbeatMonitor` is built and tested, but deliberately not wired into
   `PadlinkConnection`.** The apps own the ping timers, because the connection layer
   should not own timing. Heartbeat pings are not yet active over the wire.
-- **Carry-forward warning:** `PairingRecord` and `PairingSecret` have no redaction
-  on string interpolation. Logging a record today would print the 256-bit
-  pre-shared key in plain text. The apps will add logging, and the project
-  `CLAUDE.md` forbids logging secrets, so both types need a redacting
-  `CustomStringConvertible` before any app-layer logging exists.
+- **Carry-forward warning (corrected):** ordinary string interpolation
+  (`"\(record)"`) and `String(reflecting: record)` are safe. Swift's default
+  reflection prints `Data` as its byte count, so both print
+  `PairingSecret(bytes: 32 bytes)`, not the key bytes. Verified by running it,
+  not assumed.
+  The real leak paths are narrower: `dump(record)`, which walks into the
+  `Data` contents, and any code that reaches into `secret.bytes` and formats
+  it directly (hex, base64) into a log line. Neither `PairingRecord` nor
+  `PairingSecret` should ever be passed to `dump()`, and app code must never
+  format `secret.bytes` into a log line, since the project `CLAUDE.md`
+  forbids logging secrets regardless of what the type itself does.
+  Adding an explicit `CustomStringConvertible` to both types is still worth
+  doing as cheap defence in depth before any app-layer logging exists, even
+  though it is not fixing an active leak in ordinary interpolation.
+
+## 2026-08-13 13:51 — (auto session marker)
