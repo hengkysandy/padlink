@@ -1,6 +1,7 @@
 // Padlink/PadlinkMacTests/KeychainPairingStoreTests.swift
 import XCTest
 import PadlinkCore
+import Security
 @testable import PadlinkMac
 
 final class KeychainPairingStoreTests: XCTestCase {
@@ -50,16 +51,22 @@ final class KeychainPairingStoreTests: XCTestCase {
     func testSavingTheSameIDTwiceReplaces() throws {
         let first = try record(2, name: "old name")
         try store.save(first)
+        let secondSecret = try XCTUnwrap(PairingSecret(bytes: Data(repeating: 0xCD, count: 32)))
         let second = PairingRecord(
             id: first.id,
-            secret: first.secret,
+            secret: secondSecret,
             peerName: "new name",
             serviceName: first.serviceName,
             pairedAt: first.pairedAt
         )
         try store.save(second)
 
-        XCTAssertEqual(try store.load(id: first.id)?.peerName, "new name")
+        let loaded = try XCTUnwrap(try store.load(id: first.id))
+        XCTAssertEqual(loaded.peerName, "new name")
+        // Proves the update-first save path replaces the whole stored
+        // value, including the secret, not just leaves the old JSON blob
+        // with a coincidentally-matching peerName.
+        XCTAssertEqual(loaded.secret.bytes, secondSecret.bytes)
         XCTAssertEqual(try store.loadAll().count, 1)
     }
 
@@ -97,5 +104,24 @@ final class KeychainPairingStoreTests: XCTestCase {
     func testDeletingAnUnknownIDIsNotAnError() throws {
         let unknown = try XCTUnwrap(PairingID(bytes: Data(repeating: 7, count: 8)))
         XCTAssertNoThrow(try store.delete(id: unknown))
+    }
+
+    func testLoadingAMalformedRecordThrowsMalformedStoredRecordNotADecodingError() throws {
+        // The store cannot itself produce a malformed record, so this writes
+        // one directly with SecItemAdd, bypassing `save`.
+        let id = try XCTUnwrap(PairingID(bytes: Data(repeating: 8, count: 8)))
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: testService,
+            kSecAttrAccount as String: id.hexString,
+            kSecValueData as String: Data([0x00, 0x01, 0x02]), // not valid JSON
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        let status = SecItemAdd(query as CFDictionary, nil)
+        XCTAssertEqual(status, errSecSuccess)
+
+        XCTAssertThrowsError(try store.load(id: id)) { error in
+            XCTAssertEqual(error as? KeychainError, .malformedStoredRecord)
+        }
     }
 }

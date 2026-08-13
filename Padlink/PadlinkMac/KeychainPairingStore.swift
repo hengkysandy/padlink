@@ -55,17 +55,33 @@ final class KeychainPairingStore: PairingStore {
         )
         let data = try JSONEncoder().encode(stored)
 
-        // Replace rather than add, so saving the same id twice does not
-        // produce a duplicate item.
-        SecItemDelete(baseQuery(account: record.id.hexString) as CFDictionary)
+        // Update-first, add-on-not-found, rather than delete-then-add. A
+        // delete that succeeds followed by an add that fails would destroy
+        // an existing pairing's TLS pre-shared key with no way back short of
+        // re-scanning the QR code. Updating in place never removes the old
+        // item before its replacement is committed, so a failed write
+        // leaves the previous pairing intact.
+        let updateAttributes: [String: Any] = [
+            kSecValueData as String: data,
+            // This device only, so the secret never syncs to iCloud.
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        let updateStatus = SecItemUpdate(
+            baseQuery(account: record.id.hexString) as CFDictionary,
+            updateAttributes as CFDictionary
+        )
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw KeychainError.unexpectedStatus(updateStatus)
+        }
 
         var add = baseQuery(account: record.id.hexString)
         add[kSecValueData as String] = data
         // This device only, so the secret never syncs to iCloud.
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 
-        let status = SecItemAdd(add as CFDictionary, nil)
-        guard status == errSecSuccess else { throw KeychainError.unexpectedStatus(status) }
+        let addStatus = SecItemAdd(add as CFDictionary, nil)
+        guard addStatus == errSecSuccess else { throw KeychainError.unexpectedStatus(addStatus) }
     }
 
     func load(id: PairingID) throws -> PairingRecord? {
@@ -127,7 +143,12 @@ final class KeychainPairingStore: PairingStore {
     }
 
     private func decode(_ data: Data, id: PairingID) throws -> PairingRecord {
-        let stored = try JSONDecoder().decode(StoredRecord.self, from: data)
+        let stored: StoredRecord
+        do {
+            stored = try JSONDecoder().decode(StoredRecord.self, from: data)
+        } catch {
+            throw KeychainError.malformedStoredRecord
+        }
         guard let secret = PairingSecret(bytes: stored.secret) else {
             throw KeychainError.malformedStoredRecord
         }
