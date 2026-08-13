@@ -2484,7 +2484,13 @@ git commit -m "Add menu bar, pairing, and Accessibility onboarding UI"
 
 This stands in for the iPad, and stays as the tool that answers "is the Mac wrong or is the iPad wrong" for the life of the project.
 
-It stores its pairing as JSON in a gitignored file. **`.gitignore` must be updated before the file can ever be created**, because it holds a real pre-shared key.
+It stores its pairing as JSON holding a **real 32-byte pre-shared key**. This repository
+is public, so two independent protections apply and both are required:
+
+1. The file lives in the user's home directory, outside the working tree entirely, so
+   `git add` can never reach it.
+2. `.gitignore` still carries an un-anchored pattern, so a stray copy anywhere in the
+   tree is ignored too.
 
 - [ ] **Step 1: Ignore the pairing file first**
 
@@ -2492,8 +2498,15 @@ Append to `.gitignore`:
 
 ```
 # Test client pairing state. Holds a real pre-shared key.
-Padlink/.padlink-testclient.json
+# No slash, so this matches at any depth, not just the repo root.
+.padlink-testclient.json
 ```
+
+The pattern must have **no slash in it**. A pattern containing a slash is anchored to
+the repo root. An earlier draft of this plan wrote `Padlink/.padlink-testclient.json`,
+which would have missed the file entirely whenever the binary was run from any working
+directory other than `Padlink/`, and the key would have been committed to a public
+repository.
 
 - [ ] **Step 2: Add the executable target**
 
@@ -2554,8 +2567,11 @@ enum TestClientError: Error, CustomStringConvertible {
 }
 
 enum TestClient {
+    /// Deliberately the home directory, not the current directory. The file holds a
+    /// real pre-shared key and this repository is public, so it must never be able
+    /// to land inside the working tree no matter where the binary is run from.
     static var stateURL: URL {
-        URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".padlink-testclient.json")
     }
 
@@ -2573,7 +2589,8 @@ enum TestClient {
             serviceName: payload.serviceName
         )
         try JSONEncoder().encode(stored).write(to: stateURL)
-        print("Paired with \(payload.macName). Saved to \(stateURL.lastPathComponent)")
+        // Never print the secret itself.
+        print("Paired with \(payload.macName). Saved to \(stateURL.path)")
     }
 
     static func loadPairing() throws -> (psk: TLSPSK, serviceName: String) {
@@ -2620,13 +2637,24 @@ enum TestClient {
         return try await withCheckedThrowingContinuation { continuation in
             let resumed = ClaimFlag()
             browser.browseResultsChangedHandler = { results, _ in
-                guard let match = results.first(where: { result in
+                let exact = results.first { result in
                     if case let .service(name, _, _, _) = result.endpoint {
                         return name == serviceName
                     }
                     return false
-                }) ?? results.first else { return }
+                }
+                guard let match = exact ?? results.first else { return }
                 guard resumed.claim() else { return }
+                // The whole point of this tool is telling "the Mac is wrong" apart
+                // from "the iPad is wrong". Falling back to a different Mac in
+                // silence would produce a bare TLS failure with no explanation, so
+                // say plainly when the chosen service is not the paired one.
+                if exact == nil, case let .service(name, _, _, _) = match.endpoint {
+                    FileHandle.standardError.write(Data(
+                        "Warning: paired service \"\(serviceName)\" not found. "
+                        + "Falling back to \"\(name)\", whose key will probably not match.\n"
+                    .utf8))
+                }
                 continuation.resume(returning: match.endpoint)
             }
             browser.start(queue: .global())
@@ -2662,7 +2690,6 @@ private final class ClaimFlag: @unchecked Sendable {
 }
 ```
 
-In `findMac` above, `let resumed = Box(false)` should read `let resumed = ClaimFlag()`.
 
 ```swift
 // Padlink/Sources/PadlinkTestClient/main.swift
@@ -2703,6 +2730,7 @@ do {
               let dx = Int16(arguments[1]), let dy = Int16(arguments[2])
         else { throw TestClientError.usage }
         try await TestClient.send([.pointerMove(dx: dx, dy: dy, dtMicros: 16_666)])
+        print("Sent: move \(dx) \(dy)")
 
     case "click":
         let button: PointerButton = arguments.count >= 2 && arguments[1] == "right" ? .right : .left
@@ -2710,16 +2738,19 @@ do {
             .pointerButton(button: button, isDown: true),
             .pointerButton(button: button, isDown: false)
         ])
+        print("Sent: \(button) click")
 
     case "scroll":
         guard arguments.count >= 3,
               let dx = Int16(arguments[1]), let dy = Int16(arguments[2])
         else { throw TestClientError.usage }
         try await TestClient.send([.scroll(dx: dx, dy: dy)])
+        print("Sent: scroll \(dx) \(dy)")
 
     case "type":
         guard arguments.count >= 2 else { throw TestClientError.usage }
         try await TestClient.send([.keyText(arguments[1])])
+        print("Sent: type \(arguments[1].count) characters")
 
     case "key":
         guard arguments.count >= 2,
@@ -2731,14 +2762,17 @@ do {
             .keyCode(key: key, isDown: true, modifiers: mods),
             .keyCode(key: key, isDown: false, modifiers: mods)
         ])
+        print("Sent: key \(character) with modifiers \(mods.rawValue)")
 
     case "hold":
         guard arguments.count >= 2, let mod = modifier(named: arguments[1])
         else { throw TestClientError.usage }
         try await TestClient.send([.modifierState(modifiers: mod)])
+        print("Sent: hold \(arguments[1]). This connection closes, so run `release` next.")
 
     case "release":
         try await TestClient.send([.modifierState(modifiers: [])])
+        print("Sent: release all modifiers")
 
     default:
         throw TestClientError.usage
@@ -2756,14 +2790,33 @@ cd Padlink && swift build --product padlink-testclient
 swift test
 ```
 
-Expected: builds, and the Core suite still passes.
+Expected: builds, and the Core suite still passes with its **full existing count**.
+Report the actual number of tests that ran. An exit code of 0 alone is not evidence.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verify the secret cannot be committed**
+
+This is not optional. Run, from the repo root:
+
+```bash
+printf '{"id":"aabbccdd00112233","secret":"AAAA","serviceName":"x"}' > .padlink-testclient.json
+git check-ignore -v .padlink-testclient.json
+git status --porcelain | grep padlink-testclient || echo "NOT LISTED (correct)"
+rm .padlink-testclient.json
+```
+
+Expected: `git check-ignore` prints the matching `.gitignore` rule, and `git status`
+does **not** list the file. If `git check-ignore` exits non-zero, the pattern is wrong
+and the task is not done.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add .gitignore Padlink/Package.swift Padlink/Sources/PadlinkTestClient
 git commit -m "Add the command line test client that stands in for the iPad"
 ```
+
+Confirm with `git status --porcelain` that nothing named `padlink-testclient.json` was
+committed.
 
 ---
 
