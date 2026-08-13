@@ -19,6 +19,9 @@
 - Protocol version constant is `1`.
 - Bonjour service type is `_padlink._tcp`. Keychain service string is `com.hengkysandy.padlink`.
 - Wire format is big-endian throughout. Frames are a 4-byte big-endian length prefix followed by the payload. Frames larger than 65536 bytes are rejected.
+- **Transport security is TLS 1.2 with ECDHE_PSK ciphersuites, pinned explicitly.** Not TLS 1.3. Task 0 measured this: `sec_protocol_options_add_pre_shared_key` is RFC 4279 style and TLS 1.3 fails the handshake with -9858. Pin `0xD001`, `0xCCAC`, and `0x00AA`. Pinning is required, because leaving the ciphersuite list empty also handshakes but can negotiate a plain PSK suite with no forward secrecy.
+- **Any code waiting for a connection to become ready must treat `.waiting` as a failure.** Network.framework reports a failed PSK handshake as `.waiting` and then retries forever, never reaching `.failed`.
+- **`NWConnection` instances must be retained** for the lifetime of the handshake, including connections accepted by a listener. ARC otherwise frees them mid-handshake and the connection silently never completes.
 - `KeyModifiers` bits: 0 shift, 1 control, 2 option, 3 command, 4 function. Bits 5 to 7 are reserved and must be zero on the wire.
 - The `key` field on the wire is a **Padlink key ID**, never a macOS virtual key code.
 - No `try!`, no `as!`, no force unwrapping outside of tests.
@@ -2049,7 +2052,13 @@ git commit -m "Add pairing store protocol and in-memory implementation"
   - `public struct TLSPSK: Sendable, Equatable` with `let identity: Data`, `let key: Data`, `init(record: PairingRecord)`.
   - `public enum PadlinkTransport` with `static func listenerParameters(psks: [TLSPSK]) -> NWParameters` and `static func connectionParameters(psk: TLSPSK) -> NWParameters`.
 
-**If Task 0 found that several pre-shared keys on one listener do not work**, change `listenerParameters` to take a single `TLSPSK`, and record in `NOTES.md` that v1 supports one paired iPad. Everything else in this task is unchanged.
+**Task 0 is done. Its findings bind this task:**
+
+- **TLS 1.2, not TLS 1.3.** Every TLS 1.3 configuration failed with -9858.
+- **Pin the ECDHE_PSK ciphersuites explicitly**, or a non-forward-secret plain PSK suite can be negotiated.
+- **Several pre-shared keys on one listener do work**, and TLS picks the right one by identity. So `listenerParameters` keeps its array parameter and there is no single-key fallback.
+- **A rejected handshake surfaces as `.waiting`, not `.failed`.** The test helper below depends on this.
+- **Retain every `NWConnection`**, including accepted ones, or ARC frees them mid-handshake.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2071,23 +2080,42 @@ private func psk(_ byte: UInt8) -> TLSPSK {
     ))
 }
 
-/// Starts a listener and returns its port. The listener is cancelled by the caller.
-private func startListener(psks: [TLSPSK]) async throws -> (NWListener, NWEndpoint.Port) {
+/// Swift 6 forbids mutating a captured local from a @Sendable state handler,
+/// and accepted connections must be retained or ARC frees them mid-handshake.
+/// This box covers both needs.
+private final class Box<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: T
+    init(_ value: T) { storage = value }
+    var value: T {
+        get { lock.lock(); defer { lock.unlock() }; return storage }
+        set { lock.lock(); defer { lock.unlock() }; storage = newValue }
+    }
+}
+
+/// Starts a listener and returns its port, plus the box retaining accepted
+/// connections. The caller cancels the listener and must keep the box alive.
+private func startListener(
+    psks: [TLSPSK]
+) async throws -> (NWListener, NWEndpoint.Port, Box<[NWConnection]>) {
     let listener = try NWListener(using: PadlinkTransport.listenerParameters(psks: psks), on: 0)
+    let accepted = Box<[NWConnection]>([])
     listener.newConnectionHandler = { connection in
+        // Retaining is mandatory. Without this the handshake never completes.
+        accepted.value.append(connection)
         connection.start(queue: .global())
     }
 
     let port: NWEndpoint.Port = try await withCheckedThrowingContinuation { continuation in
-        var resumed = false
+        let resumed = Box(false)
         listener.stateUpdateHandler = { state in
-            guard !resumed else { return }
+            guard !resumed.value else { return }
             switch state {
             case .ready:
-                resumed = true
+                resumed.value = true
                 continuation.resume(returning: listener.port!)
             case .failed(let error):
-                resumed = true
+                resumed.value = true
                 continuation.resume(throwing: error)
             default:
                 break
@@ -2095,10 +2123,14 @@ private func startListener(psks: [TLSPSK]) async throws -> (NWListener, NWEndpoi
         }
         listener.start(queue: .global())
     }
-    return (listener, port)
+    return (listener, port, accepted)
 }
 
-/// True when the handshake reached ready, false when it failed.
+/// True when the handshake reached ready, false when it was rejected.
+///
+/// `.waiting` counts as rejection. Network.framework reports a failed PSK
+/// handshake as `.waiting` and then retries forever, so a helper that only
+/// watched for `.failed` would hang instead of returning false.
 private func handshakeSucceeds(psk clientPSK: TLSPSK, port: NWEndpoint.Port) async -> Bool {
     let connection = NWConnection(
         host: "127.0.0.1",
@@ -2108,15 +2140,15 @@ private func handshakeSucceeds(psk clientPSK: TLSPSK, port: NWEndpoint.Port) asy
     defer { connection.cancel() }
 
     return await withCheckedContinuation { continuation in
-        var resumed = false
+        let resumed = Box(false)
         connection.stateUpdateHandler = { state in
-            guard !resumed else { return }
+            guard !resumed.value else { return }
             switch state {
             case .ready:
-                resumed = true
+                resumed.value = true
                 continuation.resume(returning: true)
-            case .failed, .cancelled:
-                resumed = true
+            case .failed, .cancelled, .waiting:
+                resumed.value = true
                 continuation.resume(returning: false)
             default:
                 break
@@ -2127,25 +2159,40 @@ private func handshakeSucceeds(psk clientPSK: TLSPSK, port: NWEndpoint.Port) asy
 }
 
 @Test func matchingPreSharedKeyCompletesTheHandshake() async throws {
-    let (listener, port) = try await startListener(psks: [psk(0xA1)])
+    let (listener, port, accepted) = try await startListener(psks: [psk(0xA1)])
     defer { listener.cancel() }
     #expect(await handshakeSucceeds(psk: psk(0xA1), port: port))
+    _ = accepted  // keep the retaining box alive to the end of the test
 }
 
 @Test func mismatchedPreSharedKeyIsRejected() async throws {
     // This is the test that proves a stranger on the same Wi-Fi cannot connect.
-    let (listener, port) = try await startListener(psks: [psk(0xA1)])
+    let (listener, port, accepted) = try await startListener(psks: [psk(0xA1)])
     defer { listener.cancel() }
     #expect(await handshakeSucceeds(psk: psk(0xEE), port: port) == false)
+    _ = accepted
 }
 
 @Test func listenerAcceptsEveryPairedDevice() async throws {
-    // If this fails, Task 0 already told us to fall back to one paired iPad.
-    let (listener, port) = try await startListener(psks: [psk(0xA1), psk(0xB2)])
+    // Task 0 measured that several PSKs on one listener work and TLS picks the
+    // right one by identity. This test locks that behaviour in.
+    let (listener, port, accepted) = try await startListener(psks: [psk(0xA1), psk(0xB2)])
     defer { listener.cancel() }
     #expect(await handshakeSucceeds(psk: psk(0xA1), port: port))
     #expect(await handshakeSucceeds(psk: psk(0xB2), port: port))
     #expect(await handshakeSucceeds(psk: psk(0xCC), port: port) == false)
+    _ = accepted
+}
+
+@Test func onlyForwardSecretCiphersuitesArePinned() {
+    // Plain PSK suites (0x00A8, 0x00A9, 0xCCAB) complete a handshake but give
+    // no forward secrecy. If one ever appears in this list, a captured
+    // recording becomes decryptable once the secret leaks.
+    let pinned = PadlinkTransport.forwardSecretPSKCiphersuites.map(\.rawValue)
+    #expect(pinned.isEmpty == false)
+    for plainPSK: UInt16 in [0x00A8, 0x00A9, 0xCCAB] {
+        #expect(pinned.contains(plainPSK) == false)
+    }
 }
 
 @Test func tcpNoDelayIsEnabled() {
@@ -2207,15 +2254,37 @@ import Foundation
 import Network
 
 public enum PadlinkTransport {
-    /// TLS 1.3 with pre-shared keys, and Nagle's algorithm disabled.
+    /// Forward-secret PSK ciphersuites. `tls_ciphersuite_t` exposes no PSK
+    /// cases, but it is UInt16-backed, so they are built by raw value.
+    ///
+    /// Only ephemeral-Diffie-Hellman suites appear here. Plain PSK suites such
+    /// as 0x00A8 also work but have no forward secrecy, which would break the
+    /// spec's promise that a captured recording cannot be decrypted later.
+    static let forwardSecretPSKCiphersuites: [tls_ciphersuite_t] = [
+        tls_ciphersuite_t(rawValue: 0xD001)!,  // ECDHE_PSK_WITH_AES_128_GCM_SHA256
+        tls_ciphersuite_t(rawValue: 0xCCAC)!,  // ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256
+        tls_ciphersuite_t(rawValue: 0x00AA)!   // DHE_PSK_WITH_AES_128_GCM_SHA256
+    ]
+
+    /// TLS 1.2 with forward-secret pre-shared keys, and Nagle disabled.
+    ///
+    /// TLS 1.2, not 1.3. Task 0 measured that `add_pre_shared_key` is RFC 4279
+    /// style: every TLS 1.3 configuration failed with -9858.
+    ///
+    /// The ciphersuites must be pinned. Leaving the list empty still completes
+    /// a handshake, but then a plain PSK suite with no forward secrecy can be
+    /// negotiated.
     ///
     /// The secret came from a QR code, so it has full entropy and can be used
     /// directly as a pre-shared key. That is what removes the need for a
     /// password-authenticated key exchange.
     static func applyPreSharedKeys(_ options: NWProtocolTLS.Options, _ psks: [TLSPSK]) {
         let security = options.securityProtocolOptions
-        sec_protocol_options_set_min_tls_protocol_version(security, .TLSv13)
-        sec_protocol_options_append_tls_ciphersuite(security, tls_ciphersuite_t.AES_128_GCM_SHA256)
+        sec_protocol_options_set_min_tls_protocol_version(security, .TLSv12)
+        sec_protocol_options_set_max_tls_protocol_version(security, .TLSv12)
+        for suite in forwardSecretPSKCiphersuites {
+            sec_protocol_options_append_tls_ciphersuite(security, suite)
+        }
         for psk in psks {
             let key = psk.key.withUnsafeBytes { DispatchData(bytes: $0) }
             let identity = psk.identity.withUnsafeBytes { DispatchData(bytes: $0) }
@@ -2288,6 +2357,8 @@ git commit -m "Add TLS pre-shared key transport parameters"
 Design note for the implementer: `PadlinkConnection` deliberately hands out **decoded frames as `Data`**, not typed messages. The Mac decodes them as `ClientMessage` and the iPad decodes them as `ServerMessage`, so the connection itself stays direction-agnostic and both apps share one implementation.
 
 The "release everything on drop" requirement is met by the connection's `incoming` stream **finishing**. Whoever consumes the stream must run its release routine when the stream ends. That is the seam, and the Mac app plan implements the actual key and button release.
+
+**Two Swift 6 concurrency notes for this task.** The `var resumed = false` locals shown below are captured by `@Sendable` state handlers, which Swift 6 rejects. Use the same `Box` reference type defined in Task 9's tests (move it into the test target's shared scope, or redeclare it here). The same applies to any local a Network.framework callback mutates. Task 9's tests already carry a working copy.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2556,6 +2627,12 @@ public actor PadlinkConnection {
                 case .cancelled:
                     resumed = true
                     continuation.resume(throwing: ConnectionError.notReady)
+                case .waiting(let error):
+                    // A rejected pre-shared key surfaces here, not in .failed,
+                    // and Network.framework then retries forever. Without this
+                    // case the connection attempt hangs instead of throwing.
+                    resumed = true
+                    continuation.resume(throwing: ConnectionError.failed(String(describing: error)))
                 default:
                     break
                 }

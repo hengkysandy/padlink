@@ -129,22 +129,38 @@ apartment building, hotel) can see the Bonjour advertisement. Requirements:
 1. Only paired devices can connect and control the Mac.
 2. Nobody can read the traffic, live or from a recording made earlier.
 
-### Mechanism: QR code pairing, then TLS 1.3 with a pre-shared key
+### Mechanism: QR code pairing, then TLS with a pre-shared key
+
+> **Corrected 2026-08-13 after the Task 0 spike.** This section originally said
+> TLS 1.3. That is not achievable: `sec_protocol_options_add_pre_shared_key` in
+> Network.framework is RFC 4279 style and TLS 1.2 only. Every TLS 1.3
+> configuration failed the handshake with error -9858.
+>
+> The shipped design is **TLS 1.2 with ECDHE_PSK ciphersuites pinned
+> explicitly** (`0xD001`, `0xCCAC`, `0x00AA`). The ephemeral Diffie-Hellman in
+> those suites is what preserves the forward secrecy promised below. Plain PSK
+> suites such as `0x00A8` also complete a handshake but have **no** forward
+> secrecy, so pinning is a security requirement, not a preference. Leaving the
+> ciphersuite list empty also works and is therefore unsafe.
+>
+> Everything else in this section is unchanged and was confirmed by measurement:
+> mutual authentication holds, a wrong key is rejected, and one listener can
+> hold several pre-shared keys and select by identity.
 
 1. On the Mac the user clicks "Pair a device". The Mac generates a random 256-bit secret
    using `SecRandomCopyBytes` and shows it as a QR code with the Mac's name.
 2. On the iPad the user points the camera at the QR code. The secret is now on both
    devices and **never travelled over the network**.
 3. Both sides save the secret in the Keychain.
-4. Every connection from then on uses TLS 1.3 with that secret as the pre-shared key,
-   via `sec_protocol_options_add_pre_shared_key`.
+4. Every connection from then on uses TLS 1.2 with ECDHE_PSK, using that secret as the
+   pre-shared key, via `sec_protocol_options_add_pre_shared_key`.
 
 ### Why this choice
 
 - **Safest.** Full entropy from the first moment, so there is no weak PIN to brute-force.
   A person-in-the-middle attack is impossible because the key moved optically, not over
-  the air. TLS 1.3 PSK gives mutual authentication and forward secrecy, so a captured
-  recording cannot be decrypted later.
+  the air. ECDHE_PSK gives mutual authentication and forward secrecy, so a captured
+  recording cannot be decrypted later even if the secret leaks afterwards.
 - **Easiest for the user.** One action: point the camera.
 - **Simplest to build.** This is the non-obvious benefit. A short numeric PIN is too weak
   to use as a key directly, so it would force a PAKE such as SPAKE2 or SRP. That is real
@@ -479,18 +495,23 @@ this is measured rather than guessed.
 
 ---
 
-## 9. Known risk to resolve early
+## 9. Risk resolved by measurement
 
-**Multiple pre-shared keys on one listener.** With more than one paired iPad, the Mac's
-listener must hold several pre-shared keys and let TLS pick the right one by PSK identity.
-`sec_protocol_options_add_pre_shared_key` should support being called more than once, but
-this is **not yet verified**.
+**Multiple pre-shared keys on one listener: confirmed working.** The Task 0 spike
+registered two keys on one `NWListener`. Both clients connected, TLS selected the right
+secret by PSK identity, and a client with an unregistered key was rejected. So v1
+supports several paired iPads and the single-device fallback is not needed.
 
-The implementation plan starts with a small spike to prove it.
+The same spike overturned the TLS version decision. See the correction note in section 4.
 
-**Fallback if it does not work:** v1 supports exactly one paired iPad, which covers the
-actual use case. Multi-device becomes a v2 problem. The pairing ID is already in the QR
-payload and the Keychain schema, so nothing has to be redesigned later.
+Two implementation facts the spike surfaced, recorded so they are not rediscovered:
+
+- **A rejected pre-shared key surfaces as `.waiting`, not `.failed`**, and
+  Network.framework then retries forever. Any code waiting for a terminal state must
+  treat `.waiting` as a failure, or it hangs.
+- **`NWConnection` instances must be retained**, including connections accepted by a
+  listener. ARC otherwise frees them mid-handshake and the connection silently never
+  completes.
 
 ---
 
