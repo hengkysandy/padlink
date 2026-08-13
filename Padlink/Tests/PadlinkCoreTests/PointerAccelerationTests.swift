@@ -71,3 +71,47 @@ func degenerateTimeGapsNeverProduceNaNOrInfinity(dt: Double) {
     let b = fast.accelerate(dx: 5, dy: 0, dtSeconds: frame)
     #expect(b.dx > a.dx)
 }
+
+// MARK: - Round 1 fixes: non-finite / extreme-magnitude dx, dy, sensitivity
+
+@Test(arguments: [
+    (Double.nan, 5.0), (5.0, Double.nan),
+    (Double.infinity, 5.0), (5.0, Double.infinity),
+    (-Double.infinity, 5.0), (Double.nan, Double.nan),
+    (Double.infinity, Double.infinity)
+])
+func nonFiniteDeltaNeverProducesNaNOrInfinity(input: (dx: Double, dy: Double)) {
+    let out = PointerAcceleration.default.accelerate(
+        dx: input.dx, dy: input.dy, dtSeconds: frame
+    )
+    #expect(out.dx.isFinite)
+    #expect(out.dy.isFinite)
+}
+
+@Test func extremeMagnitudeDeltaIsBoundedAndFinite() {
+    let accel = PointerAcceleration.default
+    let out = accel.accelerate(dx: .greatestFiniteMagnitude, dy: 0, dtSeconds: frame)
+    #expect(out.dx.isFinite)
+    #expect(out.dy.isFinite)
+    let magnitude = (out.dx * out.dx + out.dy * out.dy).squareRoot()
+    #expect(magnitude <= accel.maxOutputPerEvent + 1e-9)
+}
+
+@Test func extremeSensitivityIsBoundedAndFinite() {
+    var accel = PointerAcceleration.default
+    accel.sensitivity = 1e300
+    let out = accel.accelerate(dx: 5, dy: 0, dtSeconds: frame)
+    #expect(out.dx.isFinite)
+    #expect(out.dy.isFinite)
+    let magnitude = (out.dx * out.dx + out.dy * out.dy).squareRoot()
+    #expect(magnitude <= accel.maxOutputPerEvent + 1e-9)
+}
+
+@Test func clampingPreservesTheInputRatio() {
+    let accel = PointerAcceleration.default
+    let dx = 30_000.0
+    let dy = 10_000.0
+    let out = accel.accelerate(dx: dx, dy: dy, dtSeconds: 0.000_001)
+    // Cross-multiply instead of dividing, so a zero denominator can't hide a bug.
+    #expect(abs(out.dx * dy - out.dy * dx) < 1e-6)
+}

@@ -44,7 +44,9 @@ public struct PointerAcceleration: Sendable, Equatable {
     ) -> (dx: Double, dy: Double) {
         guard dx.isFinite, dy.isFinite else { return (0, 0) }
 
-        let magnitude = (dx * dx + dy * dy).squareRoot()
+        // `hypot` avoids the overflow that `(dx * dx + dy * dy).squareRoot()`
+        // hits once `dx` or `dy` gets close to `Double.greatestFiniteMagnitude`.
+        let magnitude = Foundation.hypot(dx, dy)
         guard magnitude > 0 else { return (0, 0) }
 
         // A non-finite or non-positive gap means "we do not know", so fall
@@ -56,16 +58,22 @@ public struct PointerAcceleration: Sendable, Equatable {
         let speed = magnitude / dt
         let gain = min(baseGain + speedGain * speed, maxGain)
 
-        var outX = dx * gain * sensitivity
-        var outY = dy * gain * sensitivity
+        // Work in magnitude and unit-direction, not raw (dx, dy). The unit
+        // vector is always finite and within [-1, 1], even when `dx`/`dy`
+        // are near `Double.greatestFiniteMagnitude`, so scaling it by a
+        // bounded output magnitude can never itself overflow.
+        let unitX = dx / magnitude
+        let unitY = dy / magnitude
 
-        let outMagnitude = (outX * outX + outY * outY).squareRoot()
-        if outMagnitude > maxOutputPerEvent {
-            let scale = maxOutputPerEvent / outMagnitude
-            outX *= scale
-            outY *= scale
-        }
+        // `magnitude * gain * sensitivity` can still overflow to infinity,
+        // for example with an extreme sensitivity. Treat that as "clearly
+        // over the cap" rather than dividing infinity by infinity, which is
+        // where the old implementation produced NaN.
+        let rawOutputMagnitude = magnitude * gain * sensitivity
+        let outputMagnitude = rawOutputMagnitude.isFinite
+            ? min(rawOutputMagnitude, maxOutputPerEvent)
+            : maxOutputPerEvent
 
-        return (outX, outY)
+        return (unitX * outputMagnitude, unitY * outputMagnitude)
     }
 }
