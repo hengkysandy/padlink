@@ -2814,6 +2814,15 @@ Also confirm by hand:
 - Quitting the app while a button is held does not leave a stuck button.
 - With a non-US keyboard layout selected, `type` still produces the right characters.
 
+**Second-connection supersession**, which has no unit test because it needs two racing sockets. Task 10 added a guard so a dying connection's cleanup cannot clear state belonging to its live successor. Verify by hand:
+
+1. Pair and connect the test client, and confirm the menu bar shows connected.
+2. Start a second client run while the first is still connected.
+3. The menu bar must still show connected, naming the newer device, rather than dropping to "not connected".
+4. Input from the newer client must still work.
+
+The failure this checks for is the menu bar reading "not connected" while the cursor is still being driven, which would be confusing rather than obviously broken.
+
 - [ ] **Step 3 fallback: if pairing fails**
 
 Check, in this order: is the Mac's Bonjour service visible (`dns-sd -B _padlink._tcp`), did the listener actually start, and was the pairing URL pasted whole. A rejected pre-shared key surfaces as `.waiting`, not `.failed`, so a hanging connection means a key mismatch rather than a crash.
