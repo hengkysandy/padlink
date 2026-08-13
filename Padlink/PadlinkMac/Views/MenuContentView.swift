@@ -19,6 +19,9 @@ struct MenuContentView: View {
             Text("Not connected")
         case .pairing:
             Text("Waiting for a device to pair")
+            // Says where the code went. Without this the app looks idle while
+            // the useful thing has already happened on the clipboard.
+            Text("Pairing code copied. Paste it into the test client.")
         case let .connected(deviceName):
             Text("Connected: \(deviceName)")
         case let .failed(message):

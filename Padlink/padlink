@@ -1,0 +1,75 @@
+#!/bin/zsh
+# One command to build, launch, and drive Padlink.
+#
+# Everything lives on the worktree branch, not on main, and the Xcode project is
+# generated rather than committed. Remembering that every time is friction you do
+# not need while testing, so this script resolves its own location and does the
+# right thing from anywhere.
+#
+#   ./padlink up                 build and launch the Mac app
+#   ./padlink pair "<url>"       pair the test client
+#   ./padlink move 200 0         and every other test client command
+#   ./padlink test               run both test suites
+#   ./padlink down               quit the app
+
+set -e
+cd "$(dirname "$0")"
+
+APP=".build/Build/Products/Debug/PadlinkMac.app"
+
+case "$1" in
+  up)
+    echo "Building..."
+    xcodebuild -scheme PadlinkMac -configuration Debug \
+      -derivedDataPath .build build -quiet 2>&1 | grep -v "^--- xcodebuild: WARNING" || true
+    # A rebuild produces a new binary, and macOS ties Accessibility permission to
+    # the exact binary. An old copy still running would keep the old permission
+    # and quietly serve stale code, so always replace it.
+    osascript -e 'quit app "PadlinkMac"' 2>/dev/null || true
+    sleep 1
+    open "$APP"
+    echo ""
+    echo "Launched. Look for the keyboard icon in your menu bar, top right."
+    echo ""
+    echo "If this is the first launch after a rebuild, macOS has dropped"
+    echo "Accessibility permission. Re-grant it, or nothing will move:"
+    echo "  System Settings > Privacy & Security > Accessibility > PadlinkMac"
+    ;;
+
+  down)
+    osascript -e 'quit app "PadlinkMac"' 2>/dev/null && echo "Quit." || echo "Was not running."
+    ;;
+
+  paste)
+    # Clicking "Pair a device" puts the URL on the clipboard, so pairing needs
+    # no copying by hand and no visible window.
+    URL_FROM_CLIPBOARD="$(pbpaste)"
+    case "$URL_FROM_CLIPBOARD" in
+      padlink://*)
+        swift run --quiet padlink-testclient pair "$URL_FROM_CLIPBOARD"
+        ;;
+      *)
+        echo "The clipboard does not hold a pairing code."
+        echo "Click the menu bar icon, then 'Pair a device', then run this again."
+        exit 1
+        ;;
+    esac
+    ;;
+
+  test)
+    echo "=== Core ==="
+    swift test 2>&1 | tail -1
+    echo "=== Mac app ==="
+    xcodebuild test -scheme PadlinkMac -destination 'platform=macOS,arch=arm64' 2>&1 \
+      | grep -E "Executed [0-9]+ tests.*seconds|TEST SUCCEEDED|TEST FAILED" | tail -2
+    ;;
+
+  "")
+    echo "Usage: ./padlink up | down | test | pair \"<url>\" | move 200 0 | click left | ..."
+    ;;
+
+  *)
+    # Anything else goes straight to the test client.
+    swift run --quiet padlink-testclient "$@"
+    ;;
+esac

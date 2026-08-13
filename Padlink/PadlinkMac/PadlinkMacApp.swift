@@ -39,7 +39,7 @@ struct PadlinkMacApp: App {
                 service: service,
                 accessibility: accessibility,
                 onPair: startPairing,
-                onShowOnboarding: { openWindow(id: "onboarding") },
+                onShowOnboarding: { showWindow("onboarding") },
                 onQuit: quit
             )
         }
@@ -63,6 +63,18 @@ struct PadlinkMacApp: App {
         .defaultLaunchBehavior(.suppressed)
     }
 
+    /// Opens a window and brings it to the front.
+    ///
+    /// `LSUIElement` is true, so this is an accessory app: it has no Dock icon,
+    /// and macOS never activates it on its own. Without the `activate()` call
+    /// `openWindow` still creates the window, but it opens behind whatever the
+    /// user is looking at and never takes focus, which is indistinguishable
+    /// from the button doing nothing at all.
+    private func showWindow(_ id: String) {
+        openWindow(id: id)
+        NSApplication.shared.activate()
+    }
+
     private var menuIcon: String {
         if case .connected = service.state { return "keyboard.fill" }
         return "keyboard"
@@ -73,8 +85,24 @@ struct PadlinkMacApp: App {
             let payload = try service.beginPairing()
             pairing = payload
             pairingExpiry = Date().addingTimeInterval(PadlinkService.pairingWindow)
-            openWindow(id: "pairing")
+
+            // Also put the pairing URL on the clipboard, so the command line
+            // client can be paired with a paste and never needs this window.
+            // The window is for the iPad, which scans the QR code; on the Mac
+            // the URL is the useful half, and a window that fails to come
+            // forward should not be able to block pairing entirely.
+            //
+            // The clipboard is readable by other apps. Acceptable here: the key
+            // is single-use, expires in 120 seconds, and only grants control of
+            // this Mac from this network.
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(payload.urlString, forType: .string)
+
+            showWindow("pairing")
         } catch {
+            // The service has already put the reason into its `state`, which the
+            // menu renders. Clearing `pairing` keeps a stale payload from a
+            // previous attempt out of the window.
             pairing = nil
         }
     }

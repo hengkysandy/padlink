@@ -267,3 +267,53 @@ Plan 2 (macOS app) and Plan 3 (iPadOS app) get written after Core is verified.
 - Spike code deleted after recording this result, per plan.
 
 ## 2026-08-13 15:02 — (auto session marker)
+# Padlink
+
+## TODO when resuming
+
+
+## 2026-08-14 00:57 — (auto session marker)
+
+## 2026-08-14 — First working end to end run
+
+The Mac app is driven successfully by the command line client. This is the first
+time anything outside the process moved the cursor.
+
+- `./padlink paste` paired: "Paired with hengky's MacBook Air."
+- `./padlink move 200 0` moved the cursor right. Confirmed by eye, repeated 4 times.
+- No Accessibility warning printed, so the Mac reported permission granted through
+  `helloAck`. The warning path added in Task 12 stayed correctly silent.
+
+Three real defects found by hand, all in my plan rather than in the implementations:
+
+1. **The pairing window never came to the front.** `LSUIElement: true` makes this an
+   accessory app, and macOS never activates those on its own. `openWindow` created the
+   window behind everything, unfocused, which from the user's side was identical to the
+   button doing nothing. Fixed with `NSApplication.shared.activate()` in a `showWindow`
+   helper, applied to the onboarding window too, which had the same latent bug.
+2. **`beginPairing` failures were swallowed silently.** Predicted by the Task 11
+   reviewer as a thing to check by hand here, and worth checking even though the real
+   cause turned out to be different: the service now sets `.failed` with a readable
+   message, which the menu already rendered.
+3. **The pairing URL text drew on top of the Cancel button.** Wrapped to three lines
+   without reporting its height to the layout. Replaced with a "Copy pairing code"
+   button: at a size that fits the window the URL was unreadable anyway, and nobody
+   retypes a 32 byte key.
+
+Usability changes made while unblocking the run:
+
+- The pairing URL is copied to the clipboard on "Pair a device", so pairing never
+  depends on a window being visible. Clipboard is readable by other apps; accepted
+  because the key is single use and expires in 120 seconds.
+- Added `Padlink/padlink`, one script for build, launch, test, pair, and every client
+  command, so the worktree path and branch stop being something to remember.
+- `./padlink paste` pairs straight from the clipboard. The raw URL contains `&`, which
+  zsh parses as "run in background", so pasting it by hand fails with a parse error.
+
+Note for the iPad plan: scanning the QR with an iPad reports "no usable data found".
+That is correct and expected. Nothing on iPadOS claims the `padlink://` scheme until the
+Padlink iPad app exists.
+
+Still to verify by hand: the down-not-up coordinate check, click, type, scroll, copy and
+paste, held modifier survival, drag to select, quit with a button held, non-US layout,
+and two clients at once.

@@ -3,6 +3,7 @@ import ApplicationServices
 import Foundation
 import Network
 import PadlinkCore
+import Security
 
 enum ServiceState: Equatable {
     case idle
@@ -63,6 +64,19 @@ final class PadlinkService: ObservableObject {
     }
 
     func beginPairing() throws -> PairingPayload {
+        do {
+            return try makePairingCandidate()
+        } catch {
+            // Never fail silently here. The menu closes the instant the button
+            // is clicked, so without this the user sees nothing happen at all
+            // and has nothing to act on. The menu already renders `.failed`.
+            candidate = nil
+            state = .failed(Self.readable(error))
+            throw error
+        }
+    }
+
+    private func makePairingCandidate() throws -> PairingPayload {
         let payload = PairingPayload(
             pairingID: try PairingID.generate(),
             secret: try PairingSecret.generate(),
@@ -87,6 +101,31 @@ final class PadlinkService: ObservableObject {
         }
 
         return payload
+    }
+
+    /// Turns an error into something a person can act on.
+    ///
+    /// A raw `OSStatus` is a bare number, and the number is the only part that
+    /// says what actually went wrong, so it is always kept. The Keychain codes
+    /// worth naming are the ones this app can realistically hit.
+    static func readable(_ error: Error) -> String {
+        guard case let KeychainError.unexpectedStatus(status) = error else {
+            return String(describing: error)
+        }
+        let detail: String
+        switch status {
+        case errSecMissingEntitlement:
+            detail = "the app is not signed for Keychain access"
+        case errSecUserCanceled:
+            detail = "the Keychain prompt was dismissed"
+        case errSecAuthFailed:
+            detail = "the Keychain refused access"
+        case errSecInteractionNotAllowed:
+            detail = "the Keychain is locked"
+        default:
+            detail = "Keychain error"
+        }
+        return "\(detail) (\(status))"
     }
 
     func cancelPairing() {

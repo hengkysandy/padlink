@@ -1,4 +1,5 @@
 // Padlink/PadlinkMac/Views/PairingView.swift
+import AppKit
 import SwiftUI
 import PadlinkCore
 
@@ -6,6 +7,8 @@ struct PairingView: View {
     let payload: PairingPayload
     let expiresAt: Date
     let onCancel: () -> Void
+
+    @State private var copied = false
 
     var body: some View {
         VStack(spacing: 14) {
@@ -36,18 +39,22 @@ struct PairingView: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
 
-            // Shown as text because the command line test client cannot scan a
-            // QR code. Same secret, own screen, deliberately opened window.
-            Text(payload.urlString)
-                .font(.system(size: 9, design: .monospaced))
-                .textSelection(.enabled)
-                .lineLimit(3)
-                .truncationMode(.middle)
-                .foregroundStyle(.tertiary)
-                .frame(width: 300)
+            // The command line client cannot scan a QR code, so it needs the URL
+            // itself. Offered as a copy button rather than printed text: at a
+            // size that fits this window the URL is unreadable, and nobody
+            // retypes a 32 byte key by hand.
+            HStack(spacing: 10) {
+                Button(copied ? "Copied" : "Copy pairing code") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(payload.urlString, forType: .string)
+                    copied = true
+                }
+                .disabled(copied)
 
-            Button("Cancel", action: onCancel)
+                Button("Cancel", action: onCancel)
+            }
         }
         .padding(20)
+        .frame(width: 320)
     }
 }
