@@ -239,3 +239,29 @@ Plan 2 (macOS app) and Plan 3 (iPadOS app) get written after Core is verified.
   though it is not fixing an active leak in ordinary interpolation.
 
 ## 2026-08-13 13:51 — (auto session marker)
+
+## 2026-08-13 — Spike: Keychain from an ad-hoc-signed app
+
+- **Legacy file keychain works. Data protection keychain does not.**
+  `SecItemAdd` with `kSecUseDataProtectionKeychain: true` returns
+  `-34018` (`errSecMissingEntitlement`). Without that key (legacy keychain),
+  `SecItemAdd` and `SecItemCopyMatching` both return `0` and the payload
+  round trips correctly.
+- Ad-hoc signing (`CODE_SIGN_IDENTITY: "-"`) carries no entitlements, so the
+  data protection keychain refuses the request outright. The legacy
+  file-based keychain does not require that entitlement, so it works from
+  an unsigned-for-distribution but still-real bundle.
+- No password or GUI prompt appeared on either path. Both runs completed
+  non-interactively with exit code 0.
+- Rebuilt the binary from a clean `.build` directory and re-ran: identical
+  result, same status codes for both paths. A rebuild does not change the
+  outcome for either keychain (the legacy keychain is not entitlement- or
+  binary-identity-gated in this setup).
+- **Decision for Task 8 (`KeychainPairingStore`): do not set
+  `kSecUseDataProtectionKeychain: true`. Use the legacy file keychain.**
+- Brief defect found: the `project.yml` in the task brief was missing
+  `GENERATE_INFOPLIST_FILE: "YES"`. Without it, `xcodebuild` fails code
+  signing with "Cannot code sign because the target does not have an
+  Info.plist file." Added that setting to get a build; not otherwise
+  material to the Keychain finding.
+- Spike code deleted after recording this result, per plan.
