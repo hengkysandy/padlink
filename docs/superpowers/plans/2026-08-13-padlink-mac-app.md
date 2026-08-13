@@ -1860,8 +1860,15 @@ enum QRCodeImage {
 
         guard let output = filter.outputImage else { return nil }
 
+        // The generator's output is square, so one axis determines the scale.
         let scale = sideLength / output.extent.width
-        let scaled = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        // `.samplingNearest()` is load-bearing and easy to omit. CIImage's
+        // default sampling for a geometry operation is linear, which softens
+        // the module edges during rasterisation and makes the code scan
+        // slowly or not at all. Measured on Task 9.
+        let scaled = output
+            .samplingNearest()
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
         let context = CIContext()
         guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
@@ -2284,6 +2291,19 @@ struct PairingView: View {
                     .interpolation(.none)
                     .resizable()
                     .frame(width: 240, height: 240)
+            } else {
+                // Reachable if the payload exceeds the QR generator's capacity,
+                // which a very long Mac name can cause. Never leave the pairing
+                // window blank with no explanation.
+                VStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle")
+                    Text("Could not make a QR code for this Mac's name.")
+                        .font(.callout)
+                    Text("Use the text below to pair instead.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 240, height: 240)
             }
 
             Text(timerInterval: Date() ... expiresAt, countsDown: true)
