@@ -16,6 +16,13 @@
 - **Two test commands, and both must pass before a task is complete.**
   - Core: `swift test`, run from `Padlink/`
   - App: `xcodebuild test -scheme PadlinkMac -destination 'platform=macOS' -quiet`, run from `Padlink/`
+- **A stale `.xcodeproj` silently runs zero of your new tests instead of erroring.** Measured on Task 4. After adding any file to `PadlinkMac/` or `PadlinkMacTests/`, run `xcodegen generate`, and then **check the test count went up, not just that the command exited 0**. A green run that never executed your tests is the most dangerous outcome available here, because it looks identical to success. Count them with:
+
+  ```
+  xcodebuild test -scheme PadlinkMac -destination 'platform=macOS,arch=arm64' 2>&1 | grep -cE "^Test Case .* passed"
+  ```
+
+  Running counts so far: Task 3 left 1 app test, Task 4 left 8.
 - `xcode-select` points at `/Applications/Xcode.app`, so no `DEVELOPER_DIR` prefix is needed. If `swift test` ever fails with `no such module 'Testing'`, that changed.
 - **`PadlinkCore` must not import** `SwiftUI`, `UIKit`, `AppKit`, `CoreGraphics`, `AVFoundation`, or `CoreImage`. This is why screen clamping lives in the app, not Core.
 - Bundle ID `com.hengkysandy.padlink.mac`. Deployment target macOS 15.
