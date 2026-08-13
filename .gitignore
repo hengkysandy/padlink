@@ -27,3 +27,6 @@ Package.resolved
 
 # Subagent-driven development scratch
 .superpowers/
+
+# Git worktrees created by the harness
+.claude/worktrees/
