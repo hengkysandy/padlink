@@ -187,7 +187,15 @@ final class PadlinkService: ObservableObject {
                     protocolVersion: Padlink.protocolVersion,
                     accessibilityGranted: AXIsProcessTrusted()
                 ))
-                promoteCandidateIfNeeded(deviceName: deviceName)
+                // Re-checked after the `await` above: a successor may have
+                // taken over during the send, and promoting writes `state`
+                // on a save failure. An `if` here, rather than `guard ...
+                // break`, avoids binding the `break` to the `switch` instead
+                // of the `for` loop; skipping the call is all that is
+                // needed, since nothing else in this case depends on it.
+                if connection === wrapped {
+                    promoteCandidateIfNeeded(deviceName: deviceName)
+                }
 
             case let .ping(seq):
                 try? await wrapped.send(ServerMessage.pong(seq: seq))
