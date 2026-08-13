@@ -152,7 +152,16 @@ final class PadlinkService: ObservableObject {
             do {
                 try await wrapped.start()
             } catch {
-                await MainActor.run { self?.state = .failed(String(describing: error)) }
+                await MainActor.run {
+                    // A superseded connection's cancellation surfaces here as
+                    // a thrown error (PadlinkConnection.waitUntilReady's
+                    // .cancelled case). Only report it if this connection is
+                    // still the current one, or a dying predecessor's
+                    // cancellation overwrites the live successor's already-
+                    // published state.
+                    guard self?.connection === wrapped else { return }
+                    self?.state = .failed(String(describing: error))
+                }
                 return
             }
             await self?.readLoop(wrapped)
@@ -161,6 +170,12 @@ final class PadlinkService: ObservableObject {
 
     private func readLoop(_ wrapped: PadlinkConnection) async {
         for await frame in await wrapped.incoming {
+            // A successor may have superseded this connection while a frame
+            // was already sitting in the stream's buffer. Stop processing as
+            // soon as that is true, rather than only at the end of the loop,
+            // so a stale buffered frame cannot drive input or overwrite
+            // state through the successor's now-current session.
+            guard connection === wrapped else { break }
             guard let message = try? ClientMessageCodec.decode(frame) else { continue }
 
             switch message {
