@@ -13,7 +13,10 @@ final class AccessibilityStatus: ObservableObject {
 
     private let checker: @Sendable () -> Bool
     private let pollInterval: TimeInterval
-    private var timer: Timer?
+    // Read access is internal rather than private, so tests can capture the
+    // Timer and assert on its `isValid` state directly, e.g. to prove
+    // deinit invalidates it. The setter stays private.
+    private(set) var timer: Timer?
 
     init(
         checker: @escaping @Sendable () -> Bool = { AXIsProcessTrusted() },
@@ -43,6 +46,10 @@ final class AccessibilityStatus: ObservableObject {
     func stopPolling() {
         timer?.invalidate()
         timer = nil
+    }
+
+    isolated deinit {
+        stopPolling()
     }
 
     func openSystemSettings() {
