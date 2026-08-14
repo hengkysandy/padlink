@@ -76,10 +76,18 @@ final class TrackpadCoordinator {
         }
     }
 
+    /// Reports how many fingers are on the surface, for the readout the user
+    /// sees. Called on every touch event, including the ones that produce no
+    /// message at all.
+    var onFingerCountChanged: (Int) -> Void = { _ in }
+
     func deliver(_ event: TouchEvent) {
         for message in interpreter.handle(event) {
             send(message)
         }
+        // After `handle`, not before, so the count and whatever the gesture did
+        // are reported from the same event.
+        onFingerCountChanged(event.active.count)
         syncDisplayLink()
     }
 
@@ -197,6 +205,9 @@ struct TrackpadView: UIViewRepresentable {
     /// what else was held before it can let go of Command alone.
     var lockedModifiers: KeyModifiers = []
 
+    /// How many fingers are on the surface right now.
+    var onFingerCountChanged: (Int) -> Void = { _ in }
+
     func makeCoordinator() -> TrackpadCoordinator {
         TrackpadCoordinator(send: send)
     }
@@ -216,5 +227,6 @@ struct TrackpadView: UIViewRepresentable {
         // with it the interpreter's state, survives.
         context.coordinator.send = send
         context.coordinator.lockedModifiers = lockedModifiers
+        context.coordinator.onFingerCountChanged = onFingerCountChanged
     }
 }

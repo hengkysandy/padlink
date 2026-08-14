@@ -2,12 +2,17 @@
 import PadlinkCore
 import SwiftUI
 
-/// The screen the app exists for: a surface to drag on, a field to type in, and
-/// one line at the top saying whether any of it is reaching the Mac.
+/// The screen the app exists for: a keyboard, a surface to drag on, and one line
+/// at the top saying whether any of it is reaching the Mac.
+///
+/// Laid out like the machine it is driving: status at the top, then the
+/// keyboard, then the trackpad, then a thin strip of controls. The keyboard
+/// above the trackpad is the whole point. It is where a MacBook puts it, so a
+/// hand that knows the MacBook already knows this.
 ///
 /// It decides nothing. `PadStatus` turns the connection into words, `AppRouter`
-/// decided this screen may browse at all, and `KeystrokeTranslator` turns keys
-/// into messages.
+/// decided this screen may browse at all, `KeyboardLayout` says which keys
+/// exist, and `KeystrokeTranslator` turns typed text into messages.
 struct TrackpadScreen: View {
     @ObservedObject var model: AppModel
     /// Observed separately from `model`, because the connection state is
@@ -17,14 +22,28 @@ struct TrackpadScreen: View {
 
     @State private var isTyping = false
     @State private var showingLayoutPicker = false
+    @State private var showingTextEntry = false
     /// Held modifiers travel from the keyboard down to the trackpad, so a pinch
     /// can give Command back without also clearing a lock the user set.
     @State private var lockedModifiers: KeyModifiers = []
+    /// How many fingers are on the trackpad right now.
+    ///
+    /// Shown while there is more than one, and not stored anywhere. It exists
+    /// because a multi-finger gesture that does nothing gives no clue whether
+    /// the fingers were seen at all: a hand that strays over the edge of the
+    /// surface has touches filtered out, and three fingers silently arrive as
+    /// two. This turns that from a mystery into something visible.
+    @State private var fingerCount = 0
 
     /// Remembered across launches. Choosing a keyboard is a preference about
     /// the hardware in front of the user, not about this session, and having to
     /// set it again every launch is what makes a setting feel broken.
     @AppStorage("keyboardLayout") private var layoutID = KeyboardLayout.macBook.rawValue
+
+    /// Also remembered, and separate from the layout on purpose: whether the
+    /// keyboard is up is something you flip while working, and which keyboard
+    /// it is is something you set once.
+    @AppStorage("keyboardVisible") private var keyboardVisible = true
 
     private var layout: KeyboardLayout {
         KeyboardLayout(rawValue: layoutID) ?? .macBook
@@ -48,19 +67,29 @@ struct TrackpadScreen: View {
         .sheet(isPresented: $showingLayoutPicker) {
             LayoutPicker(selection: $layoutID)
         }
-        // Changing layout gives every locked modifier back first.
-        //
-        // The panel is keyed on the layout, so switching rebuilds it with a
-        // fresh engine holding nothing. Without this the Mac would still be
-        // holding whatever the old keyboard locked, and the new one would show
-        // it as off. Switching to "Trackpad only" is the case that makes it
-        // unrecoverable: the keyboard is gone, so there is nothing left to tap
-        // to release it.
-        .onChange(of: layoutID) {
-            guard lockedModifiers.isEmpty == false else { return }
-            service.send(.modifierState(modifiers: []))
-            lockedModifiers = []
+        .sheet(isPresented: $showingTextEntry) {
+            TextEntrySheet(isTyping: $isTyping) { keystroke in
+                for message in KeystrokeTranslator.messages(for: keystroke) {
+                    service.send(message)
+                }
+            }
         }
+        // Changing layout, or putting the keyboard away, gives every locked
+        // modifier back first.
+        //
+        // The panel is keyed on both, so either one rebuilds it with a fresh
+        // engine holding nothing. Without this the Mac would still be holding
+        // whatever the old keyboard locked, and the new one would show it as
+        // off. Hiding the keyboard is the case that makes it unrecoverable:
+        // there is no keyboard left to tap to release it.
+        .onChange(of: layoutID) { releaseLockedModifiers() }
+        .onChange(of: keyboardVisible) { releaseLockedModifiers() }
+    }
+
+    private func releaseLockedModifiers() {
+        guard lockedModifiers.isEmpty == false else { return }
+        service.send(.modifierState(modifiers: []))
+        lockedModifiers = []
     }
 
     /// How much room to give the keyboard, in points.
@@ -72,6 +101,7 @@ struct TrackpadScreen: View {
     /// keys down to whatever it is given, so the cap costs key size rather than
     /// cutting the bottom row off.
     private func keyboardHeight(width: CGFloat, height: CGFloat) -> CGFloat {
+        guard keyboardVisible else { return 0 }
         let rows = layout.rows.count
         guard rows > 0 else { return 0 }
         // 16 for the panel's own horizontal padding, which is not available to
@@ -93,41 +123,7 @@ struct TrackpadScreen: View {
                 onPairAgain: { model.pairAgain() }
             )
 
-            TrackpadView(
-                send: { message in service.send(message) },
-                lockedModifiers: lockedModifiers
-            )
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .strokeBorder(
-                            // Third signal for the state where everything looks
-                            // perfect and nothing on the Mac moves.
-                            status.level == .warning ? Color.orange : Color.secondary.opacity(0.35),
-                            lineWidth: status.level == .warning ? 6 : 1
-                        )
-                )
-                .overlay(
-                    // A grey rectangle with nothing in it does not say "drag
-                    // here", and this rectangle is the entire app.
-                    // `allowsHitTesting(false)` so the label never swallows the
-                    // first touch of a drag.
-                    // Four gestures, not twelve. The list exists so the surface
-                    // does not look like a blank rectangle, and a list long
-                    // enough to be a reference is one nobody reads. The rest
-                    // are in the learning docs.
-                    Text("Drag to move the cursor. Two fingers to scroll, "
-                        + "two to tap for a right click, pinch to zoom.")
-                        .multilineTextAlignment(.center)
-                        .font(.callout)
-                        .foregroundStyle(.tertiary)
-                        .allowsHitTesting(false)
-                )
-                .padding(12)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityLabel("Trackpad. Drag to move your Mac's cursor.")
-
-            if layout != .trackpadOnly {
+            if keyboardVisible {
                 KeyboardPanel(
                     layout: layout,
                     send: { message in service.send(message) },
@@ -141,10 +137,12 @@ struct TrackpadScreen: View {
                 // keyboard that went on showing Command as locked would be
                 // showing something that stopped being true.
                 .id("\(layoutID)-\(service.state.isConnected)")
-                .padding(.bottom, 6)
+                .padding(.top, 6)
             }
 
-            typingBar
+            trackpad
+
+            toolbar
         }
         // No `.ignoresSafeArea(.keyboard)`. The default is what keeps the
         // typing bar above the software keyboard instead of under it, which
@@ -157,37 +155,154 @@ struct TrackpadScreen: View {
         .background(Color(uiColor: .systemBackground))
     }
 
-    private var typingBar: some View {
-        HStack(spacing: 12) {
+    private var trackpad: some View {
+        TrackpadView(
+            send: { message in service.send(message) },
+            lockedModifiers: lockedModifiers,
+            onFingerCountChanged: { fingerCount = $0 }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .strokeBorder(
+                    // Third signal for the state where everything looks perfect
+                    // and nothing on the Mac moves.
+                    status.level == .warning ? Color.orange : Color.secondary.opacity(0.35),
+                    lineWidth: status.level == .warning ? 6 : 1
+                )
+        )
+        .overlay(trackpadOverlay)
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityLabel("Trackpad. Drag to move your Mac's cursor.")
+    }
+
+    /// The hint, replaced by the finger count while more than one finger is
+    /// down.
+    ///
+    /// `allowsHitTesting(false)` on both, so neither can swallow the first touch
+    /// of a drag.
+    @ViewBuilder private var trackpadOverlay: some View {
+        if fingerCount > 1 {
+            // The number, large. A gesture that does nothing gives no clue
+            // whether the fingers were seen: a hand straying over the edge of
+            // the surface has touches filtered out, and three fingers arrive as
+            // two with nothing to say so. This is that missing signal, and it
+            // costs nothing when one finger is down.
+            Text("\(fingerCount)")
+                .font(.system(size: 64, weight: .light, design: .rounded))
+                .foregroundStyle(.tertiary)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        } else {
+            // A grey rectangle with nothing in it does not say "drag here", and
+            // this rectangle is most of the app.
+            //
+            // Four gestures, not twelve. The list exists so the surface does
+            // not look blank, and a list long enough to be a reference is one
+            // nobody reads. The rest are in the learning docs.
+            Text("Drag to move the cursor. Two fingers to scroll, "
+                + "two to tap for a right click, pinch to zoom.")
+                .multilineTextAlignment(.center)
+                .font(.callout)
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 24)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// The thin strip along the bottom.
+    ///
+    /// Icons, not a full width text field. The field that used to live here was
+    /// the only way to type before there was a keyboard; now it is a second way,
+    /// and a second way does not deserve a permanent stripe of the screen that
+    /// the trackpad could have instead.
+    private var toolbar: some View {
+        HStack(spacing: 24) {
+            Button {
+                keyboardVisible.toggle()
+            } label: {
+                Label(
+                    keyboardVisible ? "Hide keyboard" : "Show keyboard",
+                    systemImage: keyboardVisible ? "keyboard.chevron.compact.down" : "keyboard"
+                )
+                .labelStyle(.iconOnly)
+                .font(.title3)
+            }
+            .accessibilityLabel(keyboardVisible ? "Hide the keyboard" : "Show the keyboard")
+
             Button {
                 showingLayoutPicker = true
             } label: {
-                Image(systemName: "keyboard.badge.ellipsis")
+                Image(systemName: "slider.horizontal.3")
+                    .font(.title3)
             }
             .accessibilityLabel("Choose a keyboard layout. Currently \(layout.title).")
 
-            TypingField(
-                isActive: $isTyping,
-                placeholder: isTyping
-                    ? "Typing goes to your Mac"
-                    : "Tap here to type on your Mac",
-                onKeystroke: { keystroke in
-                    for message in KeystrokeTranslator.messages(for: keystroke) {
-                        service.send(message)
+            Spacer()
+
+            // Kept, because the on-screen keyboard is a US layout of real key
+            // codes and cannot produce an accent, an emoji, or a paragraph
+            // pasted from somewhere else. This opens the iPad's own keyboard for
+            // those, and stays out of the way the rest of the time.
+            Button {
+                showingTextEntry = true
+            } label: {
+                Image(systemName: "character.cursor.ibeam")
+                    .font(.title3)
+            }
+            .accessibilityLabel("Type longer text, accents, or emoji")
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .background(Color(uiColor: .secondarySystemBackground))
+    }
+}
+
+/// The iPad's own keyboard, on demand.
+///
+/// A sheet rather than a bar, so it costs nothing until it is asked for. What it
+/// is for is everything the on-screen Mac keyboard cannot do: accents, emoji,
+/// dictation, and pasting a block of text.
+private struct TextEntrySheet: View {
+    @Binding var isTyping: Bool
+    let onKeystroke: (Keystroke) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                TypingField(
+                    isActive: $isTyping,
+                    placeholder: "Everything you type here goes to your Mac",
+                    onKeystroke: onKeystroke
+                )
+                .frame(height: 44)
+
+                Text("For accents, emoji and dictation. Letters, shortcuts and "
+                    + "arrows are quicker on the keyboard behind this.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                Spacer()
+            }
+            .padding(20)
+            .navigationTitle("Type on your Mac")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        isTyping = false
+                        dismiss()
                     }
                 }
-            )
-            .frame(height: 40)
-            .frame(maxWidth: .infinity)
-
-            if isTyping {
-                Button("Done") { isTyping = false }
-                    .buttonStyle(.bordered)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .presentationDetents([.height(220)])
+        // Opened so the user can type, so put the cursor in the field rather
+        // than making them tap once more to reach the thing they asked for.
+        .onAppear { isTyping = true }
     }
 }
 

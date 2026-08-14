@@ -126,11 +126,15 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertGreaterThan(narrowest / widest, 0.9)
     }
 
-    /// The trackpad-only layout is the absence of a keyboard, not a keyboard
-    /// with nothing on it. `TrackpadScreen` checks the case, so an empty row
-    /// here would draw a zero-height panel and a stray gap.
-    func testTrackpadOnlyHasNoRowsAtAll() {
-        XCTAssertTrue(KeyboardLayout.trackpadOnly.rows.isEmpty)
+    /// Every layout is a keyboard. "No keyboard" used to be a layout, and it
+    /// was the wrong shape for the question: whether the keyboard is up is
+    /// something the user flips while working, so it is a button, not a choice
+    /// buried in a picker. An empty layout now would draw a zero-height panel
+    /// and a stray gap with no way to explain it.
+    func testEveryLayoutHasKeys() {
+        for layout in KeyboardLayout.allCases {
+            XCTAssertFalse(layout.rows.isEmpty, layout.title)
+        }
     }
 
     /// The compact layout drops keys on purpose, but not the ones a shortcut

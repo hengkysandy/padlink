@@ -39,8 +39,11 @@ struct KeyCap: Equatable, Identifiable {
 
 /// A choice of on-screen keyboard.
 ///
-/// Three, not more. Each one answers a different question, and a fourth that
-/// only rearranged the same keys would be a setting nobody can choose between.
+/// Two, not three. There used to be a "Trackpad only" layout meaning "no
+/// keyboard", which was the wrong shape for the question: whether the keyboard
+/// is on screen is a thing you flip constantly while working, and which keyboard
+/// it is is a thing you set once. Hiding is now a button in the toolbar, and
+/// this enum only answers the second question.
 enum KeyboardLayout: String, CaseIterable, Identifiable {
     /// The whole MacBook keyboard, function row included. The default: it is
     /// the layout the user already knows, and it is the only one where a
@@ -50,10 +53,6 @@ enum KeyboardLayout: String, CaseIterable, Identifiable {
     /// looking. Half the keys, twice the target, and much more room left for the
     /// trackpad.
     case compact
-    /// No keyboard at all. The trackpad fills the screen, which is what the app
-    /// was before the keyboard existed and is still the right answer when the
-    /// job is pointing rather than typing.
-    case trackpadOnly
 
     var id: String { rawValue }
 
@@ -61,7 +60,6 @@ enum KeyboardLayout: String, CaseIterable, Identifiable {
         switch self {
         case .macBook: return "MacBook"
         case .compact: return "Compact"
-        case .trackpadOnly: return "Trackpad only"
         }
     }
 
@@ -70,7 +68,6 @@ enum KeyboardLayout: String, CaseIterable, Identifiable {
         switch self {
         case .macBook: return "Every key, function row included"
         case .compact: return "Bigger keys, more room for the trackpad"
-        case .trackpadOnly: return "The whole screen is the trackpad"
         }
     }
 
@@ -78,7 +75,6 @@ enum KeyboardLayout: String, CaseIterable, Identifiable {
         switch self {
         case .macBook: return Self.macBookRows
         case .compact: return Self.compactRows
-        case .trackpadOnly: return []
         }
     }
 

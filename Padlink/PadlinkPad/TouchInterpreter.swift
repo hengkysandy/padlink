@@ -82,10 +82,12 @@ struct TouchEvent: Sendable {
 final class TouchInterpreter {
     /// Longer than this and the touch is a press, not a tap.
     ///
-    /// A quarter of a second is comfortably above a deliberate tap and well
-    /// below a press, and it sits under the Mac's own half second double click
-    /// interval, so two chained taps still reach it in time.
-    static let tapMaxDuration: TimeInterval = 0.25
+    /// Was a quarter of a second, which was measured against nothing and turned
+    /// out to be tighter than a real hand. Raised to 0.3 after hand testing on
+    /// the iPad, where an ordinary tap regularly missed it and simply did
+    /// nothing. Still well under the Mac's half second double click interval,
+    /// so two chained taps reach it in time.
+    static let tapMaxDuration: TimeInterval = 0.3
 
     /// Further than this from where the finger landed and the touch is a drag,
     /// not a tap. Ten points matches UIKit's own allowance for a press that is
@@ -104,7 +106,14 @@ final class TouchInterpreter {
     /// limit would be more literal but it fails silently and invisibly when it
     /// is a little too tight, and the failure (no selection) looks like the
     /// feature was never built.
-    static let dragChainWindow: TimeInterval = 0.3
+    ///
+    /// Was 0.3, and hand testing showed that is exactly the failure described
+    /// above: lifting a finger and putting it back down inside 300ms is faster
+    /// than people actually move, so drag to select "was never built" as far as
+    /// anyone using it could tell. 0.45 is comfortable and still under the
+    /// Mac's half second double click interval, which is what makes the Mac
+    /// count the pair as a double click and select by word.
+    static let dragChainWindow: TimeInterval = 0.45
 
     /// How far a two finger gesture must move before it commits to being a
     /// scroll or a zoom.

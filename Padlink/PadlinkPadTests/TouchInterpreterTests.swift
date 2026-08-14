@@ -239,10 +239,15 @@ final class TouchInterpreterTests: XCTestCase {
         XCTAssertEqual(interpreter.handle(event(.ended, [], at: 100.2)), [leftUp])
     }
 
+    /// A millisecond inside the window, not exactly on it. `100.1 + 0.45` is not
+    /// exactly `100.55` in binary floating point, so a test sitting on the
+    /// boundary measures the rounding of its own arithmetic rather than the
+    /// rule. Which side of the boundary an exact hit falls on is not a
+    /// requirement anybody has; being comfortably inside it is.
     func testTouchDownAtTheEdgeOfTheChainWindowStillHoldsTheButton() {
         let interpreter = TouchInterpreter()
         tap(interpreter, from: 100, to: 100.1)
-        let begin = 100.1 + TouchInterpreter.dragChainWindow
+        let begin = 100.1 + TouchInterpreter.dragChainWindow - 0.001
         XCTAssertEqual(interpreter.handle(event(.began, [(2, 0, 0)], at: begin)), [leftDown])
     }
 
