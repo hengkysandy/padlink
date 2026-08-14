@@ -751,3 +751,38 @@ two of the four cases. Reading the worktree beat trusting the report.
 - All seven `docs/learning/*.md` files ended with two lines of stray tool markup
   (`</content>` and `</invoke>`) from how they were written last session.
   Stripped. Added `07-gestures-and-keyboard.md`.
+
+## 2026-08-14 — Hand testing on the iPad, and what it overturned
+
+First real multi-finger test on hardware. Two features were dead, and neither
+was findable from the code.
+
+- **Three finger swipes did nothing.** Not a bug in the gesture code. iPadOS
+  reserves three finger swipes for undo/redo/copy/paste, that recognizer lives
+  on the window, and when it recognizes it **cancels** the touches the view was
+  tracking. So the swipe arrived as `touchesCancelled` and the interpreter
+  correctly did nothing. Fixed with
+  `editingInteractionConfiguration = .none` on the trackpad view.
+  Four and five finger swipes cannot be reclaimed at all; they need the user to
+  turn off "Four and Five Finger Gestures" in Settings.
+- **Drag to select did nothing.** `dragChainWindow` was 300ms, which is faster
+  than people move. Raised to 450ms, still under the Mac's 500ms double click
+  interval. `tapMaxDuration` 0.25s to 0.3s for the same reason.
+
+**Both passed every unit test.** The tests hand the interpreter events directly,
+and on the device those events never arrived. Recorded in `05-gotchas.md` as the
+argument for hand testing even when coverage looks complete.
+
+### Layout, reworked on user feedback
+
+- Keyboard now sits **above** the trackpad, matching the MacBook itself. It was
+  the wrong way round.
+- Hiding the keyboard is a **button**, not a layout. "Trackpad only" was the
+  wrong shape for the question: which keyboard is a set-once choice, whether it
+  is on screen is flipped constantly. `KeyboardLayout` is two cases now.
+- The full width typing field is gone, moved behind a button. It was the only
+  way to type before the keyboard existed; now it is the second way, and it was
+  taking a permanent stripe the trackpad needed.
+- The trackpad shows the **live finger count** while more than one finger is
+  down. Added because a multi-finger gesture that does nothing gives no clue
+  whether the fingers were seen at all.

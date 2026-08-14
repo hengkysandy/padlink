@@ -21,6 +21,11 @@ What the iPad surface does, and why each gesture is built the way it is.
 
 Bold rows are new as of 2026-08-14.
 
+**Four-finger gestures only work if you turn off the system ones.** iPadOS keeps
+four and five finger swipes for itself (App Switcher, Home, switching apps) and
+there is no way for an app to take them back. Turn them off in **Settings >
+General > Multitasking & Gestures**, or just use the three-finger versions.
+
 ## The one constraint behind all of it
 
 **macOS has no public API for synthesizing a real trackpad gesture.** There is no

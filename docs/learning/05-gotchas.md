@@ -168,3 +168,46 @@ sent us hunting a bug that did not exist.
 More than twenty were found by the people implementing them, including a security
 error and a missing-key crash. The plans were still worth writing, and the
 implementers were still right to check rather than comply.
+
+## A three-finger swipe does nothing, and every test passes
+
+**Symptom.** Three fingers swipe on the trackpad. Nothing reaches the Mac. One
+and two finger gestures are fine. The unit tests are all green.
+
+**Cause.** iPadOS reserves three finger swipes for undo, redo, copy and paste.
+That gesture recognizer lives on the window, and when it recognizes it
+**cancels** the touches your view was tracking. So the view receives
+`touchesCancelled` and correctly does nothing with a gesture the user did not
+finish.
+
+**Fix.** On the view, opt out:
+
+```swift
+override var editingInteractionConfiguration: UIEditingInteractionConfiguration {
+    .none
+}
+```
+
+**Why the tests could never have caught it.** The tests hand the interpreter
+touch events directly. On a device those events never arrived. This class of bug
+is only findable on hardware, which is the argument for hand testing even when
+coverage looks complete.
+
+**Four and five fingers are different.** Those belong to the system (App
+Switcher, Home, switching apps) and there is no opt out. They reach an app only
+when the user turns off "Four and Five Finger Gestures" in Settings > General >
+Multitasking & Gestures.
+
+## Drag to select "was never built"
+
+**Symptom.** Tap, then put the finger back down and drag. Nothing selects.
+
+**Cause.** The window for the second touch was 300ms, which is faster than
+people actually move. Every attempt missed it, so the feature was invisible.
+
+**Fix.** 450ms. Still under the Mac's half second double click interval, which is
+what makes the Mac count the pair as a double click and select by word rather
+than by character.
+
+**The lesson.** A timing constant picked by reasoning rather than measurement is
+a guess. This one was documented as deliberate and was still wrong.
