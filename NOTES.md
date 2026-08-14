@@ -536,26 +536,26 @@ Suites: Core 107, PadlinkMac 49, PadlinkPadTests 18.
 Built the SwiftUI/UIKit shells over the already-committed decision layer. All new,
 all untracked except `PadlinkPadApp.swift`:
 
-- `PadlinkPad/QRScanner.swift` — `AVCaptureSession` + `AVCaptureMetadataOutput`.
+- `PadlinkPad/QRScanner.swift`: `AVCaptureSession` + `AVCaptureMetadataOutput`.
   `metadataObjectTypes` is set **after** `addOutput` (before it, the preview runs and
   never detects anything). `startRunning()` runs on a private serial queue.
   De-duplicates repeat reads of the same code; stops on the first success and in
   `dismantleUIView`.
-- `PadlinkPad/PairingScreen.swift` — driven by `ScanPlan.step(...)`. Paste field is
+- `PadlinkPad/PairingScreen.swift`: driven by `ScanPlan.step(...)`. Paste field is
   first and prominent when there is no camera.
 - `PadlinkPad/LocalNetworkNoticeScreen.swift`
-- `PadlinkPad/TrackpadScreen.swift` — `TrackpadView`, `PadStatus` header, typing bar.
-- `PadlinkPad/TypingField.swift` — `UITextField` subclass. Backspace goes through a
+- `PadlinkPad/TrackpadScreen.swift`: `TrackpadView`, `PadStatus` header, typing bar.
+- `PadlinkPad/TypingField.swift`: `UITextField` subclass. Backspace goes through a
   `deleteBackward()` override, not the delegate: UIKit does not call
   `shouldChangeCharactersIn` when there is nothing to delete, and this field is always
   empty. All rewrite traits off (autocorrect, autocaps, smart quotes/dashes, inline
   prediction, math completion, Writing Tools).
-- `PadlinkPad/PadlinkPadApp.swift` — placeholder replaced; owns `AppModel`, switches on
+- `PadlinkPad/PadlinkPadApp.swift`: placeholder replaced; owns `AppModel`, switches on
   `screen`, wires `scenePhase`.
-- `PadlinkPadTests/TypingFieldTests.swift` — 12 tests, only over real new logic.
+- `PadlinkPadTests/TypingFieldTests.swift`: 12 tests, only over real new logic.
 
 Verified:
-- `xcodebuild -scheme PadlinkPad -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M4)' build` — succeeds, no warnings.
+- `xcodebuild -scheme PadlinkPad -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M4)' build`: succeeds, no warnings.
 - Installed and launched with `xcrun simctl install/launch booted com.hengkysandy.padlink.pad`.
   Shows the pairing screen, still alive after 4 s, no crash.
 - Suites: Core 107, PadlinkMac 49, PadlinkPadTests 219 (was 207).

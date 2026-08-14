@@ -35,7 +35,7 @@
 
 ---
 
-### Task 0: Spike — prove TLS pre-shared keys work, and whether several fit on one listener
+### Task 0: Spike: prove TLS pre-shared keys work, and whether several fit on one listener
 
 This is a **throwaway spike**, not shipped code. Its output is an answer plus a working code snippet that Task 8 copies. Delete the target when the task is done.
 
@@ -159,7 +159,7 @@ Read the output and answer three questions:
 
 - [ ] **Step 4: Record the answer**
 
-Append to `NOTES.md` under a `## 2026-08-13 — Spike: TLS-PSK` heading: whether multiple pre-shared keys worked, whether the wrong key was rejected, and the exact working form of the `applyPSKs` function. Task 8 copies that function.
+Append to `NOTES.md` under a `## 2026-08-13, Spike: TLS-PSK` heading: whether multiple pre-shared keys worked, whether the wrong key was rejected, and the exact working form of the `applyPSKs` function. Task 8 copies that function.
 
 If multiple keys did **not** work, also record that v1 supports exactly one paired iPad, and that `PadlinkTransport.listenerParameters` takes a single `TLSPSK` rather than an array. Task 8 adapts.
 
@@ -2759,11 +2759,11 @@ In section 9, replace the "Known risk to resolve early" text with what Task 0 ac
 
 - [ ] **Step 3: Update NOTES.md**
 
-Append a `## 2026-08-13 — PadlinkCore complete` entry recording: the test count, the spike result, and that the Keychain store is still to be built in the app plans.
+Append a `## 2026-08-13, PadlinkCore complete` entry recording: the test count, the spike result, and that the Keychain store is still to be built in the app plans.
 
 - [ ] **Step 4: Update CLAUDE.md**
 
-The file still says this directory "is NOT a code repo — there's no app to ship". Replace that with a description of the hybrid: `NOTES.md` is the running journal, and `Padlink/` is a real codebase. Keep the existing rules about never logging secrets and asking before destructive commands.
+The file still says this directory "is NOT a code repo, there's no app to ship". Replace that with a description of the hybrid: `NOTES.md` is the running journal, and `Padlink/` is a real codebase. Keep the existing rules about never logging secrets and asking before destructive commands.
 
 - [ ] **Step 5: Verify the whole suite one more time and commit**
 

@@ -182,11 +182,11 @@ screenshot rather than typing `#`.
 
 ## Design documents
 
-- `docs/superpowers/specs/2026-08-13-padlink-design.md` — the design and why each choice was
+- `docs/superpowers/specs/2026-08-13-padlink-design.md`: the design and why each choice was
   made, including the alternatives that were rejected
-- `docs/superpowers/plans/2026-08-13-padlink-core.md` — the implementation plan this was
+- `docs/superpowers/plans/2026-08-13-padlink-core.md`: the implementation plan this was
   built from
-- `NOTES.md` — the running journal, including measured findings and known gaps
+- `NOTES.md`: the running journal, including measured findings and known gaps
 
 ---
 
