@@ -48,6 +48,19 @@ struct TrackpadScreen: View {
         .sheet(isPresented: $showingLayoutPicker) {
             LayoutPicker(selection: $layoutID)
         }
+        // Changing layout gives every locked modifier back first.
+        //
+        // The panel is keyed on the layout, so switching rebuilds it with a
+        // fresh engine holding nothing. Without this the Mac would still be
+        // holding whatever the old keyboard locked, and the new one would show
+        // it as off. Switching to "Trackpad only" is the case that makes it
+        // unrecoverable: the keyboard is gone, so there is nothing left to tap
+        // to release it.
+        .onChange(of: layoutID) {
+            guard lockedModifiers.isEmpty == false else { return }
+            service.send(.modifierState(modifiers: []))
+            lockedModifiers = []
+        }
     }
 
     /// How much room to give the keyboard, in points.
@@ -121,7 +134,7 @@ struct TrackpadScreen: View {
                 // everything it was holding when a connection ends, so a
                 // keyboard that went on showing Command as locked would be
                 // showing something that stopped being true.
-                .id(service.state.isConnected)
+                .id("\(layoutID)-\(service.state.isConnected)")
                 .padding(.bottom, 6)
             }
 

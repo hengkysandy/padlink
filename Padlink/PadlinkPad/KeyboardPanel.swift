@@ -1,6 +1,7 @@
 // Padlink/PadlinkPad/KeyboardPanel.swift
 import PadlinkCore
 import SwiftUI
+import UIKit
 
 /// The on-screen keyboard.
 ///
@@ -48,6 +49,23 @@ struct KeyboardPanel: View {
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .center)
         }
         .padding(.horizontal, 8)
+        // Leaving the app gives every locked modifier back.
+        //
+        // Backgrounding does not close the connection: `PadService` only makes
+        // a note of it, so the socket can outlive the app being on screen. A
+        // Command locked here would stay held on the Mac while the user was
+        // somewhere else entirely, turning their next keystroke into a
+        // shortcut, with the one thing that could explain it (this keyboard)
+        // not visible. The trackpad already does the same for a held mouse
+        // button, for the same reason.
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.willResignActiveNotification
+        )) { _ in
+            for message in engine.clearModifiers() {
+                send(message)
+            }
+            onLockedModifiersChanged(engine.lockedModifiers)
+        }
     }
 
     /// How tall `rows` rows are, in key units: 0.92 per key and 0.06 of spacing
