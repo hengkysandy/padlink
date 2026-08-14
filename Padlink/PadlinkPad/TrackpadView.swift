@@ -18,6 +18,29 @@ final class TrackpadCoordinator {
 
     private let interpreter = TouchInterpreter()
 
+    /// Drives momentum scrolling after the fingers have left the glass.
+    ///
+    /// A display link rather than a `Timer`, so each step lands once per frame
+    /// and carries the frame's own timestamp. The interpreter holds no clock at
+    /// all: it is handed a time and asked what to send, which is what makes
+    /// coasting testable without waiting for one.
+    ///
+    /// A running link retains its target, so while momentum is spending itself
+    /// this coordinator keeps itself alive. That is a cycle, and it is left
+    /// alone deliberately: momentum always decays to a stop, `syncDisplayLink`
+    /// invalidates the link the moment it does, and the cycle breaks on its own
+    /// within about two seconds. A weak proxy object to avoid it would be more
+    /// code than the problem.
+    private var displayLink: CADisplayLink?
+
+    /// Modifiers the on screen keyboard is holding on the Mac.
+    ///
+    /// Passed through to the interpreter, which needs it before a pinch can
+    /// release Command without also releasing the keyboard's locks.
+    var lockedModifiers: KeyModifiers = [] {
+        didSet { interpreter.baseModifiers = lockedModifiers }
+    }
+
     /// `nonisolated(unsafe)` only so `deinit`, which is not isolated, can read
     /// it to unregister. It is written once in `init` and read once in
     /// `deinit`, both on the main thread, and never touched in between.
@@ -57,12 +80,42 @@ final class TrackpadCoordinator {
         for message in interpreter.handle(event) {
             send(message)
         }
+        syncDisplayLink()
     }
 
     func releaseHeldInput() {
         for message in interpreter.releaseAll() {
             send(message)
         }
+        syncDisplayLink()
+    }
+
+    /// Runs the display link exactly while there is momentum to spend.
+    ///
+    /// Called after everything that can start or stop a coast, so there is one
+    /// rule rather than a start call and a stop call to keep in step. A display
+    /// link left running wakes the app sixty times a second forever, which on
+    /// an iPad is a battery complaint with no visible cause.
+    private func syncDisplayLink() {
+        if interpreter.hasMomentum {
+            guard displayLink == nil else { return }
+            let link = CADisplayLink(target: self, selector: #selector(stepMomentum))
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        } else {
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+    }
+
+    @objc private func stepMomentum(_ link: CADisplayLink) {
+        // The frame's own timestamp, never `Date()`, for the same reason touch
+        // events use theirs: it is when the frame is, not when this method got
+        // around to running.
+        for message in interpreter.stepMomentum(at: link.timestamp) {
+            send(message)
+        }
+        syncDisplayLink()
     }
 }
 

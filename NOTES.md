@@ -694,3 +694,5 @@ Commit `011a47a`. Full write-up: `.superpowers/sdd/pairing-security-report.md`.
 - A peer can drive input without ever sending `hello`. `readLoop`'s `default:` branch
   has no handshake guard.
 - **Two agents were editing this worktree at once today.** Do not do that again.
+
+## 2026-08-14 12:56 — (auto session marker)
