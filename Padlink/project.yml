@@ -31,6 +31,11 @@ targets:
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Opts into the data protection keychain. See the file itself for why:
+        # without it, every launch of a Debug build asks for the login password
+        # and "Always Allow" cannot make it stop.
+        CODE_SIGN_ENTITLEMENTS: PadlinkMac/PadlinkMac.entitlements
         # Ad-hoc signing is the default so the project builds for anyone who
         # clones it, with no Apple account required.
         #
@@ -106,6 +111,7 @@ targets:
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # 2 is iPad. The plan's orientation key is `~ipad`-suffixed, so an
         # iPhone build would inherit no supported orientations at all. This
         # app is iPad-only anyway.

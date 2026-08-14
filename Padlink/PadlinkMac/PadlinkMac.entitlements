@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Opts the app into the modern (data protection) keychain.
+
+	     Without this the app falls back to the legacy file keychain, where
+	     access is governed by a per-item access list holding a snapshot of the
+	     trusted binary. A Debug build also carries `get-task-allow`, which
+	     makes it debuggable, and macOS will not let a debuggable binary hold a
+	     persistent grant, because any process could attach to it and read the
+	     secret. The result is a login-password prompt on every single launch
+	     that "Always Allow" cannot stop.
+
+	     The data protection keychain keys on the app's signed identity instead
+	     of a binary snapshot, so it survives rebuilds and never prompts.
+
+	     Requires a real signing team, which is why this was not possible when
+	     the project started: the Task 0 spike measured -34018
+	     (errSecMissingEntitlement) from the ad-hoc signed build it had then. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.hengkysandy.padlink.mac</string>
+	</array>
+</dict>
+</plist>

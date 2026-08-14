@@ -33,14 +33,25 @@ final class KeychainPairingStore: PairingStore {
     }
 
     private func baseQuery(account: String?) -> [String: Any] {
-        // Deliberately NOT setting kSecUseDataProtectionKeychain. The Task 0
-        // spike measured that it fails from an ad-hoc-signed bundle with
-        // errSecMissingEntitlement (-34018). The legacy file keychain works
-        // and survives rebuilds. Revisit when a Developer ID identity and a
-        // keychain-access-group entitlement exist.
+        // The data protection keychain, matching iOS.
+        //
+        // The Task 0 spike rejected this because it returned -34018
+        // (errSecMissingEntitlement) from the ad-hoc signed bundle the project
+        // had then. That blocker is gone: the app now signs with a real team
+        // and carries a keychain-access-group entitlement.
+        //
+        // The claim that replaced it, that the legacy keychain "survives
+        // rebuilds", turned out to be false in practice. Legacy items are
+        // guarded by a per-item access list holding a snapshot of the trusted
+        // binary, and a Debug build carries `get-task-allow`, so macOS treats
+        // it as debuggable and refuses to persist the grant at all. That is a
+        // login-password prompt on every launch which "Always Allow" cannot
+        // stop. This keychain keys on the signed identity instead, so it
+        // survives rebuilds and never prompts.
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service
+            kSecAttrService as String: service,
+            kSecUseDataProtectionKeychain as String: true
         ]
         if let account { query[kSecAttrAccount as String] = account }
         return query

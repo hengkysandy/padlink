@@ -109,13 +109,21 @@ final class KeychainPairingStoreTests: XCTestCase {
     func testLoadingAMalformedRecordThrowsMalformedStoredRecordNotADecodingError() throws {
         // The store cannot itself produce a malformed record, so this writes
         // one directly with SecItemAdd, bypassing `save`.
+        //
+        // `kSecUseDataProtectionKeychain` must match the store's own queries.
+        // macOS has two separate keychains, and the flag chooses between them,
+        // so without it this writes to the legacy one while the store reads the
+        // modern one. The symptom is not a missing item but `errSecDuplicateItem`
+        // on the second run, because the legacy writes accumulate where nothing
+        // ever cleans them up.
         let id = try XCTUnwrap(PairingID(bytes: Data(repeating: 8, count: 8)))
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: testService,
             kSecAttrAccount as String: id.hexString,
             kSecValueData as String: Data([0x00, 0x01, 0x02]), // not valid JSON
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecUseDataProtectionKeychain as String: true
         ]
         let status = SecItemAdd(query as CFDictionary, nil)
         XCTAssertEqual(status, errSecSuccess)

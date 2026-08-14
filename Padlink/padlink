@@ -151,7 +151,12 @@ case "$1" in
     echo "=== Core ==="
     swift test 2>&1 | tail -1
     echo "=== Mac app ==="
-    xcodebuild test -scheme PadlinkMac -destination 'platform=macOS,arch=arm64' 2>&1 \
+    # Signing is passed here too, not just in `up`. The Mac app now carries an
+    # entitlements file (for the data protection keychain), and an entitled
+    # build needs a provisioning profile, which needs the team. Without this
+    # the target does not build and every test looks broken.
+    xcodebuild test -scheme PadlinkMac -destination 'platform=macOS,arch=arm64' \
+      "${SIGNING[@]}" 2>&1 \
       | grep -E "Executed [0-9]+ tests?.*seconds|TEST SUCCEEDED|TEST FAILED" | tail -2
     echo "=== iPad app ==="
     # The simulator can report "Application failed preflight checks" if it is
