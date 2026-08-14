@@ -459,3 +459,25 @@ Suites: Core 107, PadlinkMac 49, PadlinkPadTests 18.
    modifier survival, drag to select, quit with a button held, non-US layout, two
    clients at once. The coordinate check is done and verified by measurement.
 6. Then: whole-branch review, merge to main, push.
+
+## 2026-08-14 — iPad plan Tasks 3, 4, 5 (browse, remember, connect)
+
+- `Padlink/PadlinkPad/MacBrowser.swift`: `NWBrowser` wrapper plus `DiscoveryTracker`,
+  the pure reducer that decides what the browser's reports mean. Five outcomes, not
+  two: idle, searching, otherMacsOnly, found, localNetworkDenied, failed.
+- `Padlink/PadlinkPad/PadPairingStore.swift`: Keychain store with
+  `kSecUseDataProtectionKeychain` (which the Mac cannot use) and
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
+- `Padlink/PadlinkPad/PadService.swift`: client lifecycle, `PadStateMachine` holds
+  every state rule. One read loop over `PadlinkConnection.incoming`, at
+  `PadService.swift:536`.
+- Suites after: Core 107, PadlinkMac 49, PadlinkPadTests **95** (was 18).
+  Command: `./padlink test`.
+- 18 mutations applied one at a time, all 18 caught, sources restored byte for byte.
+- Plan defects found: Task 4's `kSecAttrAccessibleAfterFirstUnlock` (no
+  `ThisDeviceOnly`) would let a device backup restore a working key onto a different
+  iPad; Task 5 has no liveness check, so Core's `HeartbeatMonitor` is still dead code
+  and a dropped Wi-Fi leaves the state on `.connected`.
+- Not verified without hardware: the local network denial itself (the simulator does
+  not enforce the permission), real Bonjour discovery, and a real rejected key.
+- Report: `.superpowers/sdd/ipad-task-3-5-report.md`.
