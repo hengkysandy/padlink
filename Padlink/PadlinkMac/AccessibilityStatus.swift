@@ -11,6 +11,9 @@ import Foundation
 final class AccessibilityStatus: ObservableObject {
     @Published private(set) var isTrusted: Bool
 
+    /// Called when, and only when, the answer changes.
+    var onChange: ((Bool) -> Void)?
+
     private let checker: @Sendable () -> Bool
     private let pollInterval: TimeInterval
     // Read access is internal rather than private, so tests can capture the
@@ -31,6 +34,9 @@ final class AccessibilityStatus: ObservableObject {
         let current = checker()
         if current != isTrusted {
             isTrusted = current
+            // Only on a real change. This runs once a second for the life of
+            // the app, and the observer puts a message on the wire.
+            onChange?(current)
         }
     }
 

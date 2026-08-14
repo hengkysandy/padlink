@@ -98,6 +98,52 @@ final class AccessibilityStatusTests: XCTestCase {
         cancellable.cancel()
     }
 
+    // MARK: - Telling the connection, not only the menu
+
+    /// The iPad hears the Accessibility answer once, in `helloAck`. When the
+    /// user grants the permission, something has to tell the iPad, or the
+    /// orange "your Mac is ignoring this" banner stays up until the connection
+    /// is rebuilt. This callback is that something.
+    func testAChangeIsReportedToTheObserver() {
+        let granted = LockedFlag(false)
+        let status = AccessibilityStatus(checker: { granted.value })
+        var reported: [Bool] = []
+        status.onChange = { reported.append($0) }
+
+        granted.value = true
+        status.refresh()
+
+        XCTAssertEqual(reported, [true])
+    }
+
+    /// The revoke direction, which is the worse one: the iPad would otherwise
+    /// keep saying everything is fine while macOS throws every event away.
+    func testARevocationIsReportedToTheObserver() {
+        let granted = LockedFlag(true)
+        let status = AccessibilityStatus(checker: { granted.value })
+        var reported: [Bool] = []
+        status.onChange = { reported.append($0) }
+
+        granted.value = false
+        status.refresh()
+
+        XCTAssertEqual(reported, [false])
+    }
+
+    /// The poller runs once a second for the life of the app. Reporting on
+    /// every tick would put a message on the wire every second forever.
+    func testNothingIsReportedWhenTheAnswerHasNotChanged() {
+        let status = AccessibilityStatus(checker: { false })
+        var reported: [Bool] = []
+        status.onChange = { reported.append($0) }
+
+        status.refresh()
+        status.refresh()
+        status.refresh()
+
+        XCTAssertTrue(reported.isEmpty, "reported \(reported) for an unchanged answer")
+    }
+
     func testDeinitInvalidatesThePollingTimer() {
         // Regression test for the orphaned-timer leak: if an instance is
         // deallocated while polling, the timer must be invalidated instead

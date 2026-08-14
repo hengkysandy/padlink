@@ -116,6 +116,7 @@ public enum ServerMessageCodec {
         case helloAck = 128
         case pong = 129
         case error = 130
+        case accessibilityChanged = 131
     }
 
     public static func encode(_ message: ServerMessage) throws -> Data {
@@ -132,6 +133,9 @@ public enum ServerMessageCodec {
             writer.write(TypeByte.error.rawValue)
             writer.write(code)
             try writer.writeString(text)
+        case let .accessibilityChanged(granted):
+            writer.write(TypeByte.accessibilityChanged.rawValue)
+            writer.write(granted)
         }
         return writer.data
     }
@@ -154,6 +158,8 @@ public enum ServerMessageCodec {
             message = .pong(seq: try reader.readUInt32())
         case .error:
             message = .error(code: try reader.readUInt8(), message: try reader.readString())
+        case .accessibilityChanged:
+            message = .accessibilityChanged(granted: try reader.readBool())
         }
 
         guard reader.isAtEnd else { throw CodecError.trailingBytes }

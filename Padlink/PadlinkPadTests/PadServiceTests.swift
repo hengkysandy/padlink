@@ -78,6 +78,137 @@ final class PadStateMachineTests: XCTestCase {
         XCTAssertTrue(text?.contains("Mac") == true, "got: \(text ?? "nil")")
     }
 
+    /// The Mac reports Accessibility once, in `helloAck`. If that were the only
+    /// report, granting the permission would leave the orange warning up until
+    /// the connection was rebuilt, and the user would have no way to know their
+    /// fix had worked.
+    func testGrantingAccessibilityLaterClearsTheWarningWithoutReconnecting() {
+        var m = connected(accessibilityGranted: false)
+        m.apply(.received(.accessibilityChanged(granted: true)))
+        XCTAssertEqual(m.state, .connected(accessibilityGranted: true))
+        XCTAssertNil(m.state.accessibilityWarning)
+    }
+
+    /// The worse direction. Permission revoked mid-session means every event
+    /// the iPad sends is now thrown away, while the screen still says
+    /// everything is fine.
+    func testRevokingAccessibilityMidSessionRaisesTheWarning() {
+        var m = connected(accessibilityGranted: true)
+        m.apply(.received(.accessibilityChanged(granted: false)))
+        XCTAssertEqual(m.state, .connected(accessibilityGranted: false))
+        XCTAssertNotNil(m.state.accessibilityWarning)
+    }
+
+    /// A stray frame must not fabricate a connection, the same rule `helloAck`
+    /// already follows.
+    func testAnAccessibilityChangeWhileIdleIsIgnored() {
+        var m = machine()
+        m.apply(.received(.accessibilityChanged(granted: true)))
+        XCTAssertEqual(m.state, .idle)
+    }
+
+    func testAnAccessibilityChangeWhileConnectingDoesNotFabricateAConnection() {
+        var m = connecting()
+        m.apply(.received(.accessibilityChanged(granted: true)))
+        XCTAssertEqual(m.state, .connecting)
+    }
+
+    func testAnAccessibilityChangeAfterAFailureDoesNotResurrectTheConnection() {
+        var m = connected()
+        m.apply(.disconnected(.peerClosed))
+        m.apply(.received(.accessibilityChanged(granted: true)))
+        guard case .failed(.connectionLost) = m.state else {
+            return XCTFail("expected the failure to stand, got \(m.state)")
+        }
+    }
+
+    // MARK: - The heartbeat
+    //
+    // Without it, Wi-Fi dropping mid-drag leaves the read loop waiting forever
+    // and both ends reporting a healthy connection. TCP takes minutes to
+    // notice; the user sees "Connected" and nothing moving.
+
+    func testASingleMissedPingDoesNotDropTheConnection() {
+        var m = connected()
+        m.apply(.pingSent)
+        XCTAssertEqual(m.state, .connected(accessibilityGranted: true))
+    }
+
+    /// The boundary. One below the limit must still be a live connection, or a
+    /// single late pong on a busy network drops a working session.
+    func testTheConnectionSurvivesOneMissedPingFewerThanTheLimit() {
+        var m = connected()
+        for _ in 0 ..< (Padlink.heartbeatMissedLimit - 1) {
+            m.apply(.pingSent)
+        }
+        XCTAssertEqual(m.state, .connected(accessibilityGranted: true))
+    }
+
+    func testEnoughUnansweredPingsGiveUpOnTheConnection() {
+        var m = connected()
+        for _ in 0 ..< Padlink.heartbeatMissedLimit {
+            m.apply(.pingSent)
+        }
+        XCTAssertEqual(m.state, .failed(.macStoppedAnswering))
+    }
+
+    /// The Mac answering is the whole signal. A pong has to clear the count,
+    /// not merely fail to increase it.
+    func testAPongClearsTheMissedPingCount() {
+        var m = connected()
+        for _ in 0 ..< (Padlink.heartbeatMissedLimit - 1) {
+            m.apply(.pingSent)
+        }
+        m.apply(.received(.pong(seq: 1)))
+        for _ in 0 ..< (Padlink.heartbeatMissedLimit - 1) {
+            m.apply(.pingSent)
+        }
+        XCTAssertEqual(m.state, .connected(accessibilityGranted: true))
+    }
+
+    /// A heartbeat task belonging to a connection that has already gone must
+    /// not be able to turn an unrelated state into a failure.
+    func testPingsSentWhileNotConnectedChangeNothing() {
+        var m = machine()
+        for _ in 0 ..< (Padlink.heartbeatMissedLimit * 2) {
+            m.apply(.pingSent)
+        }
+        XCTAssertEqual(m.state, .idle)
+
+        var connectingMachine = connecting()
+        for _ in 0 ..< (Padlink.heartbeatMissedLimit * 2) {
+            connectingMachine.apply(.pingSent)
+        }
+        XCTAssertEqual(connectingMachine.state, .connecting)
+    }
+
+    /// The heartbeat must not fight reconnection. A count left over from the
+    /// dead connection would kill the new one on its first ping.
+    func testANewConnectionStartsTheHeartbeatCountFromZero() {
+        var m = connected()
+        for _ in 0 ..< Padlink.heartbeatMissedLimit {
+            m.apply(.pingSent)
+        }
+        XCTAssertEqual(m.state, .failed(.macStoppedAnswering))
+
+        m.apply(.searchStarted)
+        m.apply(.discovered(.service(
+            name: "Mac", type: Padlink.bonjourServiceType, domain: "local.", interface: nil
+        )))
+        m.apply(.received(.helloAck(
+            protocolVersion: Padlink.protocolVersion,
+            accessibilityGranted: true
+        )))
+        XCTAssertEqual(m.state, .connected(accessibilityGranted: true))
+
+        m.apply(.pingSent)
+        XCTAssertEqual(
+            m.state,
+            .connected(accessibilityGranted: true),
+            "the new connection inherited the dead one's missed-ping count"
+        )
+    }
+
     // MARK: - Handshake failures
 
     func testAWrongProtocolVersionFailsInsteadOfConnecting() {
@@ -282,6 +413,23 @@ final class PadFailureMessageTests: XCTestCase {
         XCTAssertTrue(PadFailure.notPaired.message.lowercased().contains("pair"))
     }
 
+    /// A dead heartbeat is not the same as the Mac closing the connection
+    /// politely, and it must not borrow that wording. Nothing was reported by
+    /// either end: the link simply went quiet, which is what a Wi-Fi drop or a
+    /// sleeping Mac looks like from here.
+    func testTheHeartbeatFailureNamesSilenceRatherThanADisconnect() {
+        let message = PadFailure.macStoppedAnswering.message.lowercased()
+        XCTAssertTrue(message.contains("answer"), "got: \(message)")
+        XCTAssertTrue(
+            message.contains("wi-fi") || message.contains("asleep") || message.contains("sleep"),
+            "the message must name a cause the user can act on, got: \(message)"
+        )
+        XCTAssertNotEqual(
+            PadFailure.macStoppedAnswering.message,
+            PadFailure.connectionLost("your Mac closed the connection").message
+        )
+    }
+
     func testTheProtocolMismatchMessageNamesBothVersions() {
         let message = PadFailure.protocolMismatch(mac: 2, pad: 1).message
         XCTAssertTrue(message.contains("2"), "got: \(message)")
@@ -302,7 +450,8 @@ final class PadFailureMessageTests: XCTestCase {
             .handshakeTimedOut,
             .protocolMismatch(mac: 2, pad: 1),
             .macReportedError(code: 1, message: "x"),
-            .connectionLost("x")
+            .connectionLost("x"),
+            .macStoppedAnswering
         ]
         for failure in all {
             XCTAssertFalse(failure.message.isEmpty, "\(failure) has no message")

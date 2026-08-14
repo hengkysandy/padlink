@@ -27,7 +27,9 @@ struct AccessibilityOnboardingView: View {
         }
         .padding(20)
         .frame(width: 380)
-        .onAppear { status.startPolling() }
-        .onDisappear { status.stopPolling() }
+        // No start/stop here any more. Polling is owned by the app and runs
+        // for its whole life, because the connection needs the answer just as
+        // much as this window does, and this window is almost never open.
+        // Stopping it on disappear would have switched that off again.
     }
 }

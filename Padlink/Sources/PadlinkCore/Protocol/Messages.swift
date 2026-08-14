@@ -33,4 +33,16 @@ public enum ServerMessage: Sendable, Equatable {
     case helloAck(protocolVersion: UInt16, accessibilityGranted: Bool)
     case pong(seq: UInt32)
     case error(code: UInt8, message: String)
+    /// The Accessibility answer changed after the handshake.
+    ///
+    /// `helloAck` reports it once, at connect time. Without this message the
+    /// iPad keeps showing whatever was true then: an orange warning that will
+    /// not go away after the user grants the permission, or, worse, a green
+    /// "Connected" after the permission was revoked and every event the iPad
+    /// sends is being thrown away.
+    ///
+    /// Absolute, not a delta, for the same reason `modifierState` is: a lost
+    /// message self-corrects on the next one instead of leaving the two sides
+    /// permanently disagreeing.
+    case accessibilityChanged(granted: Bool)
 }

@@ -5,7 +5,7 @@ import PadlinkCore
 
 @main
 struct PadlinkMacApp: App {
-    @StateObject private var accessibility = AccessibilityStatus()
+    @StateObject private var accessibility: AccessibilityStatus
     @StateObject private var service: PadlinkService
     @State private var pairing: PairingPayload?
     @State private var pairingExpiry = Date()
@@ -25,6 +25,22 @@ struct PadlinkMacApp: App {
             macName: macName
         )
         _service = StateObject(wrappedValue: service)
+
+        let accessibility = AccessibilityStatus()
+        // Told to the iPad, not only shown in the menu. Without this the iPad
+        // is stuck with whatever `helloAck` said at handshake time: an orange
+        // warning that survives the user granting the permission, or a green
+        // "Connected" over a session where every event is being discarded.
+        accessibility.onChange = { [weak service] granted in
+            service?.accessibilityChanged(granted: granted)
+        }
+        // Polls for the life of the app, not only while the onboarding window
+        // happens to be open. That window is suppressed at launch and most
+        // users never open it, so polling from its `onAppear` alone meant the
+        // permission was in practice only ever read once, at startup, and both
+        // the menu's own warning and this callback were dead.
+        accessibility.startPolling()
+        _accessibility = StateObject(wrappedValue: accessibility)
 
         // Loads stored pairings and starts listening right away, so a
         // previously paired iPad can reconnect without the user having to

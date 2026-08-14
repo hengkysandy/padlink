@@ -23,6 +23,7 @@ final class PadlinkService: ObservableObject {
 
     private var listener: NWListener?
     private var connection: PadlinkConnection?
+    private var watchdog: ConnectionWatchdog?
     private var acceptedKeys: [TLSPSK] = []
     private var candidate: (payload: PairingPayload, psk: TLSPSK)?
     private var pairingTimer: Timer?
@@ -57,6 +58,7 @@ final class PadlinkService: ObservableObject {
         // `stop()` returns control to the MainActor, so reading `connection`
         // inside the closure instead of capturing it here would always see
         // nil and never actually cancel anything.
+        stopWatchdog()
         let connectionToStop = connection
         connection = nil
         Task { await connectionToStop?.cancel() }
@@ -187,6 +189,20 @@ final class PadlinkService: ObservableObject {
         let wrapped = PadlinkConnection(connection: raw)
         connection = wrapped
 
+        // One watchdog per connection, started before the handshake. A peer
+        // that completes TLS and then goes silent without ever saying `hello`
+        // would otherwise hold the single connection slot forever.
+        stopWatchdog()
+        let newWatchdog = ConnectionWatchdog { [weak self] in
+            // Identity-checked here rather than inside `peerWentSilent`, so
+            // that method stays a plain "the peer is gone, clean up" and can
+            // be tested without a socket.
+            guard let self, self.connection === wrapped else { return }
+            self.peerWentSilent()
+        }
+        newWatchdog.start()
+        watchdog = newWatchdog
+
         Task { [weak self] in
             do {
                 try await wrapped.start()
@@ -215,6 +231,14 @@ final class PadlinkService: ObservableObject {
             // so a stale buffered frame cannot drive input or overwrite
             // state through the successor's now-current session.
             guard connection === wrapped else { break }
+
+            // Before decoding, and outside the `try?`. A frame this build
+            // cannot read still proves the peer is alive and still talking,
+            // and a newer iPad may send message types this build has never
+            // heard of. Counting only decodable frames would let a newer peer
+            // be declared dead for speaking a dialect we do not know.
+            watchdog?.noteFrameReceived()
+
             guard let message = try? ClientMessageCodec.decode(frame) else { continue }
 
             switch message {
@@ -245,21 +269,72 @@ final class PadlinkService: ObservableObject {
         }
 
         let reason = await wrapped.closeReason
+        endSession(isCurrentConnection: connection === wrapped, reason: reason)
+    }
 
-        // Identity-checked: a successor connection may already have replaced
-        // `self.connection` by the time this dying loop's stream finishes
-        // (see `accept`). Without this guard, a stale loop ending would wipe
-        // out the live successor's state and wrongly release held buttons
-        // and modifiers that the successor's session, not this one, owns.
-        guard connection === wrapped else { return }
-
-        // The stream finishing is the signal that the connection is gone, and
-        // therefore the signal to release any held button or modifier.
+    /// The tail of a read loop: a connection has ended, for any reason.
+    ///
+    /// `isCurrentConnection` is false when a successor has already replaced
+    /// `self.connection` while this loop was still dying. That is the common
+    /// case, not a rare one: `accept()` swaps the connection synchronously, and
+    /// a Wi-Fi drop leaves the old socket with no FIN to end its stream, so the
+    /// old loop usually ends *after* its replacement is already live.
+    func endSession(isCurrentConnection: Bool, reason: CloseReason?) {
+        // Unconditional, and above the identity guard. `MessageRouter.held` is
+        // one instance for the whole process, not one per connection, so a
+        // button left held by a dying session is not "the successor's" to keep:
+        // it belongs to nobody, and nothing else will ever let it go.
+        //
+        // The cost is that if the successor has already pressed a button by
+        // now, this posts a release the successor did not ask for. That is one
+        // dropped click, and the iPad's next button-down fixes it. The other
+        // way round leaves a mouse button stuck down at the HID level, which
+        // makes the Mac's own trackpad drag too and cannot be undone from
+        // inside the app. Take the recoverable failure.
         router.releaseEverything()
+
+        // Per-connection, so identity-checked. Clearing these for a session
+        // that is already gone would wipe out the live successor's state.
+        guard isCurrentConnection else { return }
+        stopWatchdog()
         connection = nil
         if case .connected = state {
             state = reason == .framingViolation ? .failed("framing violation") : .idle
         }
+    }
+
+    /// The iPad stopped answering the heartbeat.
+    ///
+    /// Reached from the watchdog, never from a frame. Tears the connection
+    /// down so the listener is free for the reconnect that usually follows a
+    /// Wi-Fi drop, and releases held input first, because that is the whole
+    /// reason for noticing quickly.
+    func peerWentSilent() {
+        router.releaseEverything()
+        stopWatchdog()
+        let dying = connection
+        connection = nil
+        if case .connected = state { state = .idle }
+        Task { await dying?.cancel() }
+    }
+
+    /// Tells the connected iPad that the Accessibility answer changed.
+    ///
+    /// `helloAck` reports it once, at handshake time. Without this the iPad
+    /// keeps showing whatever was true then, so granting the permission leaves
+    /// the orange warning up, and revoking it leaves a green "Connected" over
+    /// a session in which nothing works.
+    ///
+    /// Fire and forget, and harmless with no connection: the poller behind it
+    /// runs for the life of the app whether or not an iPad is attached.
+    func accessibilityChanged(granted: Bool) {
+        guard let connection else { return }
+        Task { try? await connection.send(ServerMessage.accessibilityChanged(granted: granted)) }
+    }
+
+    private func stopWatchdog() {
+        watchdog?.stop()
+        watchdog = nil
     }
 
     /// A successful connection during a pairing window promotes the candidate

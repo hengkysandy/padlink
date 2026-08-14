@@ -558,3 +558,42 @@ trackpad now has a rounded border and a hint label.
 - Still to do: write `.superpowers/sdd/ipad-task-7-8-views-report.md` and commit.
 - Not verified: the camera path end to end, the local network prompt, and pairing by
   paste (the simulator cannot be tapped from the CLI). All need a device or a person.
+
+## 2026-08-14 10:37 — (auto session marker)
+
+## 2026-08-14 — Heartbeat, live Accessibility, and a stuck mouse button
+
+Branch `worktree-padlink-mac`. Full write-up: `.superpowers/sdd/heartbeat-report.md`.
+
+- Test counts: Core 107 -> 114, Mac 49 -> 66, iPad 219 -> 231. `cd Padlink && ./padlink test`.
+- **Protocol version bumped 1 -> 2.** Not for the new message type (unknown type
+  bytes already throw and both consumers skip them), but for the heartbeat: a v2
+  Mac now expects traffic every ~2s and a v1 iPad never pings, so a v1 iPad would
+  be killed every 6 seconds.
+- **Heartbeat wired in.** iPad pings every 2s; `HeartbeatMonitor` lives inside
+  `PadStateMachine` so a missed ping flows through as `PadEvent.pingSent` instead
+  of a timer mutating state. Pongs come through the one existing `incoming`
+  iterator. New failure `PadFailure.macStoppedAnswering` with its own wording.
+- **Mac watches for silence instead of pinging back.** New `ConnectionWatchdog`
+  (2s tick, 3 missed = dead). Any inbound frame counts, and `noteFrameReceived()`
+  runs before decode so a newer iPad is not declared dead for an unknown message.
+- **`ServerMessage.accessibilityChanged(granted:)`, type byte 131.** iPad updates
+  `PadState` live, so the orange banner clears when the user grants the permission
+  and appears if it is revoked mid-session.
+- **Critical bug found by a parallel review, verified and fixed.**
+  `PadlinkService.readLoop` had its identity guard above `router.releaseEverything()`.
+  `router` is one instance for the process, and `accept()` swaps `connection`
+  synchronously, so a superseded loop ALWAYS returned early and never released.
+  Wi-Fi drop mid-drag + reconnect = left mouse button stuck down at the HID level.
+  Extracted `endSession(isCurrentConnection:reason:)` and moved the release above
+  the guard.
+- **Second real defect:** `AccessibilityStatus.startPolling()` was only called from
+  the onboarding window's `onAppear`. That window is suppressed at launch, so the
+  permission was in practice read once at startup and never again. Polling now runs
+  for the life of the app, from `PadlinkMacApp.init()`. Without this fix the
+  accessibility feature would have shipped dead.
+- **Not fixed, reported:** the Mac does NOT reject a protocol mismatch (it
+  discards the client version in `hello`); only the iPad does, from `helloAck`.
+  And held key codes are still untracked in `MessageRouter`, so a stuck letter key
+  cannot be released (modifiers are fine, they use the absolute `modifierState`).
+- 26 mutations run, one at a time, all caught, every restore verified by SHA-256.

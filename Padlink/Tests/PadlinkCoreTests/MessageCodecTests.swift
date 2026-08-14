@@ -21,7 +21,9 @@ private let allServerMessages: [ServerMessage] = [
     .helloAck(protocolVersion: 1, accessibilityGranted: true),
     .helloAck(protocolVersion: 1, accessibilityGranted: false),
     .pong(seq: 7),
-    .error(code: 3, message: "not paired")
+    .error(code: 3, message: "not paired"),
+    .accessibilityChanged(granted: true),
+    .accessibilityChanged(granted: false)
 ]
 
 @Test(arguments: allClientMessages)
@@ -63,6 +65,50 @@ func serverMessagesRoundTrip(message: ServerMessage) throws {
     #expect(throws: CodecError.unknownMessageType(99)) {
         _ = try ClientMessageCodec.decode(Data([99, 0, 0]))
     }
+}
+
+/// The forwards-compatibility guarantee, from the iPad's side.
+///
+/// A newer Mac may send a server message this build has never heard of. Both
+/// consumers of `ServerMessageCodec` use `try?` and skip what they cannot
+/// decode, so the only requirement is that decode throws rather than crashing
+/// or returning nonsense. Nothing tested this before: the client direction had
+/// this test and the server direction did not.
+@Test func unknownServerMessageTypeIsReportedRatherThanCrashing() {
+    #expect(throws: CodecError.unknownMessageType(200)) {
+        _ = try ServerMessageCodec.decode(Data([200, 1, 2, 3]))
+    }
+}
+
+/// A server type byte that is one past the last known one, which is exactly
+/// what the next protocol version will look like on this build's wire.
+@Test func theNextServerMessageTypeDecodesAsUnknownRatherThanAsAKnownCase() {
+    #expect(throws: CodecError.unknownMessageType(132)) {
+        _ = try ServerMessageCodec.decode(Data([132, 1]))
+    }
+}
+
+@Test func accessibilityChangedUsesTypeByte131() throws {
+    // On the wire. Reusing an existing byte would make an old peer decode this
+    // as something else entirely.
+    let encoded = try ServerMessageCodec.encode(.accessibilityChanged(granted: true))
+    #expect(encoded.first == 131)
+    #expect(encoded.count == 2)
+}
+
+@Test func accessibilityChangedRejectsTrailingBytes() {
+    var encoded = try! ServerMessageCodec.encode(.accessibilityChanged(granted: false))
+    encoded.append(0xFF)
+    #expect(throws: CodecError.trailingBytes) {
+        _ = try ServerMessageCodec.decode(encoded)
+    }
+}
+
+@Test func serverMessageTypeBytesAreStable() throws {
+    // These are on the wire. Changing one silently breaks older peers.
+    #expect(try ServerMessageCodec.encode(.helloAck(protocolVersion: 1, accessibilityGranted: true)).first == 128)
+    #expect(try ServerMessageCodec.encode(.pong(seq: 1)).first == 129)
+    #expect(try ServerMessageCodec.encode(.error(code: 1, message: "x")).first == 130)
 }
 
 @Test func emptyPayloadIsTruncated() {

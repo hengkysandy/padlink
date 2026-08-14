@@ -32,6 +32,14 @@ enum PadFailure: Equatable, Sendable {
     case protocolMismatch(mac: UInt16, pad: UInt16)
     case macReportedError(code: UInt8, message: String)
     case connectionLost(String)
+    /// The Mac stopped answering the heartbeat.
+    ///
+    /// Deliberately separate from `connectionLost`. Nothing was reported by
+    /// either end and no socket error arrived: the link simply went quiet,
+    /// which is what a Wi-Fi drop or a sleeping Mac looks like from the iPad.
+    /// Calling that "your Mac closed the connection" would send the user
+    /// looking at the Mac's app instead of at their network.
+    case macStoppedAnswering
 
     var message: String {
         switch self {
@@ -109,6 +117,16 @@ enum PadFailure: Equatable, Sendable {
 
         case let .connectionLost(detail):
             return "The connection to your Mac ended: \(detail)."
+
+        case .macStoppedAnswering:
+            return """
+                Your Mac stopped answering. Padlink checks every \
+                \(Int(Padlink.heartbeatInterval)) seconds, and the last \
+                \(Padlink.heartbeatMissedLimit) checks got no reply at all. \
+                The usual causes are Wi-Fi dropping on this iPad or on your \
+                Mac, or your Mac going to sleep. Tap "Try again" once both are \
+                awake and back on the same network.
+                """
         }
     }
 }
@@ -163,6 +181,13 @@ enum PadEvent: Equatable, Sendable {
     case received(ServerMessage)
     case disconnected(CloseReason?)
     case stopped
+    /// A heartbeat ping went out on the wire.
+    ///
+    /// The event is the *sending*, not a timer expiring, so the machine counts
+    /// what is actually outstanding. The answer arrives separately, as
+    /// `.received(.pong)`. Keeping the count in the machine is what lets every
+    /// rule about a dead heartbeat be tested with no timers and no socket.
+    case pingSent
 }
 
 /// The pure state machine behind `PadService`.
@@ -178,6 +203,15 @@ enum PadEvent: Equatable, Sendable {
 /// working.
 struct PadStateMachine {
     private(set) var state: PadState = .idle
+
+    /// Counts pings the Mac has not answered.
+    ///
+    /// It lives here, in the pure half, rather than next to the timer that
+    /// sends the pings. A timer that reached in and set `state` itself would
+    /// sit outside every rule in this machine, and the first thing it would
+    /// break is reconnection: a stale timer from a dead connection would tear
+    /// down the live one that replaced it.
+    private var heartbeat = HeartbeatMonitor(missedLimit: Padlink.heartbeatMissedLimit)
 
     init() {}
 
@@ -195,6 +229,10 @@ struct PadStateMachine {
             // restarting the connection dance from `.connected` would drop a
             // working session.
             guard state == .searching else { return }
+            // A fresh connection starts with a clean heartbeat. Carrying the
+            // dead connection's missed count over would kill its replacement
+            // on the replacement's very first ping.
+            heartbeat = HeartbeatMonitor(missedLimit: Padlink.heartbeatMissedLimit)
             state = .connecting
 
         case let .discoveryFailed(failure):
@@ -221,6 +259,16 @@ struct PadStateMachine {
 
         case .stopped:
             state = .idle
+
+        case .pingSent:
+            // Only while connected. A heartbeat task whose connection has
+            // already been replaced must not be able to fail an unrelated
+            // state, and a ping sent during the handshake is not evidence
+            // about anything: the handshake has its own timeout.
+            guard state.isConnected else { return }
+            heartbeat.recordPingSent()
+            guard heartbeat.isDead else { return }
+            state = .failed(.macStoppedAnswering)
         }
     }
 
@@ -242,7 +290,17 @@ struct PadStateMachine {
             state = .connected(accessibilityGranted: accessibilityGranted)
 
         case .pong:
-            break
+            // The Mac is alive. The sequence number is not checked: the
+            // count is cleared by any answer, and a pong for an older ping
+            // still proves the link is carrying traffic in both directions.
+            heartbeat.recordPongReceived()
+
+        case let .accessibilityChanged(granted):
+            // Only while connected, for the same reason `helloAck` guards:
+            // a stray frame must never fabricate a connection. It also must
+            // not resurrect one that has already failed.
+            guard case .connected = state else { return }
+            state = .connected(accessibilityGranted: granted)
 
         case let .error(code, message):
             guard state == .connecting || state.isConnected else { return }
@@ -300,6 +358,7 @@ final class PadService: ObservableObject {
     private var browser: MacBrowser?
     private var connection: PadlinkConnection?
     private var sessionTask: Task<Void, Never>?
+    private var heartbeatTask: Task<Void, Never>?
     private var searchTimeoutTask: Task<Void, Never>?
     private var handshakeTimeoutTask: Task<Void, Never>?
     private var lastDiscovery: MacDiscovery = .idle
@@ -504,6 +563,52 @@ final class PadService: ObservableObject {
         sessionTask = Task { [weak self] in
             await self?.runSession(wrapped)
         }
+
+        heartbeatTask = Task { [weak self] in
+            await self?.runHeartbeat(wrapped)
+        }
+    }
+
+    /// Sends a `ping` every `Padlink.heartbeatInterval` and lets the machine
+    /// count the ones that go unanswered.
+    ///
+    /// This is a sender, not a reader. `PadlinkConnection.incoming` is an
+    /// `AsyncStream` and supports exactly one iterator: a second `for await`
+    /// here would split frames with `runSession`, so half the pongs (and half
+    /// of everything else) would go to whichever consumer got there first. The
+    /// pongs arrive through the one existing loop, which feeds them to the
+    /// machine as `.received(.pong)`.
+    ///
+    /// Nothing here decides anything. Whether a missed ping matters is
+    /// `PadStateMachine`'s rule, and it is tested there with no timers.
+    private func runHeartbeat(_ wrapped: PadlinkConnection) async {
+        var seq: UInt32 = 0
+        while true {
+            try? await Task.sleep(for: .seconds(Padlink.heartbeatInterval))
+            if Task.isCancelled { return }
+            // A superseded connection's heartbeat must die with it rather than
+            // keep pinging a socket nobody is reading.
+            guard connection === wrapped else { return }
+            // Nothing to prove while the handshake is still in flight; that
+            // has its own timeout, and a ping sent then would be counted
+            // against a connection that is not yet claiming to work.
+            guard state.isConnected else { continue }
+
+            seq &+= 1
+            // A send that throws is itself evidence the link is gone, so the
+            // ping is counted either way.
+            try? await wrapped.send(ClientMessage.ping(seq: seq))
+            guard connection === wrapped else { return }
+            apply(.pingSent)
+
+            // The machine, not this loop, decided the peer is dead. All that
+            // is left is to make it true of the socket as well, so the next
+            // `start()` builds a fresh one.
+            if state.isConnected == false {
+                teardownConnection()
+                return
+            }
+        }
     }
 
     /// The one and only consumer of `PadlinkConnection.incoming`.
@@ -556,6 +661,8 @@ final class PadService: ObservableObject {
         cancelHandshakeTimeout()
         sessionTask?.cancel()
         sessionTask = nil
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
         // Captured before clearing, for the same reason the Mac's `stop()`
         // does: the Task body runs after this function returns, so reading
         // `self.connection` inside it would always see nil.
