@@ -43,10 +43,13 @@ struct PairingView: View {
             // itself. Offered as a copy button rather than printed text: at a
             // size that fits this window the URL is unreadable, and nobody
             // retypes a 32 byte key by hand.
+            //
+            // This button is the only thing that ever puts the code on the
+            // clipboard, and `PairingClipboard` marks it concealed so clipboard
+            // managers and Universal Clipboard leave it alone.
             HStack(spacing: 10) {
                 Button(copied ? "Copied" : "Copy pairing code") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(payload.urlString, forType: .string)
+                    PairingClipboard.copy(payload)
                     copied = true
                 }
                 .disabled(copied)

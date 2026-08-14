@@ -16,6 +16,7 @@ enum ServiceState: Equatable {
 @MainActor
 final class PadlinkService: ObservableObject {
     @Published private(set) var state: ServiceState = .idle
+    @Published private(set) var completedPairings = 0
 
     private let store: any PairingStore
     private let router: MessageRouter
@@ -36,6 +37,27 @@ final class PadlinkService: ObservableObject {
         self.macName = macName
     }
 
+    /// The pre-shared key identities the **running** listener was built for.
+    ///
+    /// `acceptedKeys` is what this object intends to accept;
+    /// `listeningIdentities` is what is really on the socket. They drift apart
+    /// whenever a rebuild is skipped or fails, which is exactly the shape of a
+    /// pairing key outliving its window, so the two are kept separate and
+    /// asserted on separately.
+    private(set) var listeningIdentities: [Data] = []
+
+    /// The one key identity a listener built for `keys` can vouch for, or nil
+    /// when it can vouch for nothing.
+    ///
+    /// A listener holding exactly one pre-shared key is proof: a TLS 1.2
+    /// pre-shared key handshake against it cannot complete without that key.
+    /// Two keys is not proof, because either could have been used, and
+    /// Network.framework will not say which. Reporting one of them anyway
+    /// would be a check that verifies nothing.
+    static func soleIdentity(of keys: [TLSPSK]) -> Data? {
+        keys.count == 1 ? keys[0].identity : nil
+    }
+
     // Test hooks. The socket path itself is proven end to end in Task 12.
     var acceptedKeysForTesting: [TLSPSK] { acceptedKeys }
     func reloadAcceptedKeysForTesting() throws { try reloadAcceptedKeys() }
@@ -54,6 +76,7 @@ final class PadlinkService: ObservableObject {
         pairingTimer = nil
         listener?.cancel()
         listener = nil
+        listeningIdentities = []
         // Captured before nulling out `connection`. `Task { }` only runs once
         // `stop()` returns control to the MainActor, so reading `connection`
         // inside the closure instead of capturing it here would always see
@@ -134,16 +157,48 @@ final class PadlinkService: ObservableObject {
         pairingTimer?.invalidate()
         pairingTimer = nil
         candidate = nil
-        try? reloadAcceptedKeys()
-        try? restartListener()
+        do {
+            try reloadAcceptedKeys()
+            try restartListener()
+        } catch {
+            // Failing to close the pairing window has to be loud, and it has to
+            // fail closed. `reloadAcceptedKeys` assigns nothing when it throws,
+            // so `acceptedKeys` would still hold the candidate, and the running
+            // listener would still accept it, while the UI reported the window
+            // shut. A live pairing key that outlives the window the user
+            // believes expired is the worst outcome available here, so drop
+            // every key and stop listening instead. Reconnecting a paired iPad
+            // then needs a restart of the app, which is visible and recoverable.
+            acceptedKeys = []
+            listener?.cancel()
+            listener = nil
+            listeningIdentities = []
+            state = .failed("Could not close the pairing window: \(Self.readable(error))")
+            return
+        }
         if case .connected = state {} else { state = .idle }
     }
 
-    /// Stored pairings, plus the pairing candidate while a pairing window is open.
+    /// Which pre-shared keys the listener will accept.
+    ///
+    /// While a pairing window is open this is **only** the candidate, not the
+    /// stored pairings as well. That exclusivity is what makes the promotion
+    /// check in `promoteCandidateIfNeeded` mean anything: Network.framework
+    /// offers no way to read the pre-shared key identity an established
+    /// `NWConnection` actually negotiated, so the only honest evidence of which
+    /// key a peer used is that the listener which accepted it knew exactly one.
+    ///
+    /// The cost is real and deliberate: for the length of the window an already
+    /// paired iPad cannot make a *new* connection. A connection it already has
+    /// keeps running, because rebuilding the listener never touches
+    /// `self.connection`, and the window now closes the moment the pairing
+    /// lands rather than always running the full 120 seconds.
     private func reloadAcceptedKeys() throws {
-        var keys = try store.loadAll().map(TLSPSK.init(record:))
-        if let candidate { keys.append(candidate.psk) }
-        acceptedKeys = keys
+        if let candidate {
+            acceptedKeys = [candidate.psk]
+        } else {
+            acceptedKeys = try store.loadAll().map(TLSPSK.init(record:))
+        }
     }
 
     /// Pre-shared keys are fixed when `NWParameters` is created, so any change
@@ -153,6 +208,10 @@ final class PadlinkService: ObservableObject {
     /// `self.connection`.
     private func restartListener() throws {
         listener?.cancel()
+        // Cleared first, and restored only once a listener is actually running,
+        // so a throw part way through cannot leave this claiming the socket
+        // still accepts keys it does not.
+        listeningIdentities = []
 
         guard acceptedKeys.isEmpty == false else {
             listener = nil
@@ -166,16 +225,35 @@ final class PadlinkService: ObservableObject {
             name: macName,
             type: Padlink.bonjourServiceType
         )
+        // Captured now, from the key set this listener is being built for. If
+        // that set holds exactly one key, then a peer this listener accepts
+        // completed a TLS handshake against that one key and no other, so the
+        // pre-shared key identity is implied by which listener let it in.
+        // Anything else is ambiguous and reported as nil.
+        //
+        // This is the only way to know. `sec_protocol_metadata_access_pre_
+        // shared_keys` reports the PSKs *configured locally*, not the one
+        // negotiated: measured on a two-key loopback listener, the server saw
+        // both identities while the client, which had registered one, saw one.
+        // Network.framework exposes no other accessor.
+        let soleIdentity = Self.soleIdentity(of: acceptedKeys)
         newListener.newConnectionHandler = { [weak self] raw in
             // Retaining is mandatory: without it ARC frees the connection
             // mid-handshake and it silently never completes.
-            Task { @MainActor in self?.accept(raw) }
+            Task { @MainActor in self?.accept(raw, acceptedIdentity: soleIdentity) }
         }
         newListener.start(queue: .main)
         listener = newListener
+        listeningIdentities = acceptedKeys.map(\.identity)
     }
 
-    private func accept(_ raw: NWConnection) {
+    /// `acceptedIdentity` is the single pre-shared key identity the listener
+    /// that accepted this connection was built for, or nil if that listener
+    /// accepted more than one key. It travels down the call chain as a
+    /// parameter rather than as a stored property on purpose: a superseded
+    /// connection's read loop outlives `self.connection`, so a stored value
+    /// would describe the wrong session exactly when it matters.
+    private func accept(_ raw: NWConnection, acceptedIdentity: Data?) {
         // Only one controlling device at a time. A second connection is most
         // often the same device reconnecting after a Wi-Fi drop or a sleep
         // and wake, before its old socket has finished dying, so the old
@@ -219,11 +297,11 @@ final class PadlinkService: ObservableObject {
                 }
                 return
             }
-            await self?.readLoop(wrapped)
+            await self?.readLoop(wrapped, acceptedIdentity: acceptedIdentity)
         }
     }
 
-    private func readLoop(_ wrapped: PadlinkConnection) async {
+    private func readLoop(_ wrapped: PadlinkConnection, acceptedIdentity: Data?) async {
         for await frame in await wrapped.incoming {
             // A successor may have superseded this connection while a frame
             // was already sitting in the stream's buffer. Stop processing as
@@ -257,7 +335,10 @@ final class PadlinkService: ObservableObject {
                 // of the `for` loop; skipping the call is all that is
                 // needed, since nothing else in this case depends on it.
                 if connection === wrapped {
-                    promoteCandidateIfNeeded(deviceName: deviceName)
+                    promoteCandidateIfNeeded(
+                        deviceName: deviceName,
+                        acceptedIdentity: acceptedIdentity
+                    )
                 }
 
             case let .ping(seq):
@@ -337,13 +418,31 @@ final class PadlinkService: ObservableObject {
         watchdog = nil
     }
 
-    /// A successful connection during a pairing window promotes the candidate
-    /// to a stored pairing. No listener rebuild is needed: the promoted
-    /// record carries the same id and secret as the candidate already
-    /// accepted by the running listener, so the set of keys it will accept
-    /// does not actually change.
-    private func promoteCandidateIfNeeded(deviceName: String) {
+    /// Turns the pairing candidate into a stored pairing, but only for the one
+    /// device that proved it holds the candidate's own key.
+    ///
+    /// The check is the whole point. Without it any connection at all promotes
+    /// the candidate, so an already-paired iPad merely reconnecting during an
+    /// open window turns a secret nobody ever scanned into a permanent stored
+    /// credential, and the 120 second window bounds nothing.
+    ///
+    /// `acceptedIdentity` is the evidence, and it is second-hand on purpose:
+    /// there is no first-hand source. It is the single key the accepting
+    /// listener was built for, which the peer must have used because a TLS 1.2
+    /// pre-shared key handshake against a one-key listener cannot complete any
+    /// other way. Comparing it to the *current* candidate also closes the race
+    /// where a connection accepted by the previous listener finishes its
+    /// handshake after the window has already opened.
+    ///
+    /// Internal rather than private so it can be tested without a socket, in
+    /// the same way as `endSession`.
+    func promoteCandidateIfNeeded(deviceName: String, acceptedIdentity: Data?) {
         guard let candidate else { return }
+        // Constant-time comparison is not needed: both sides are already known
+        // to this process, and an attacker learns nothing from the timing of a
+        // check on an identity they themselves supplied.
+        guard acceptedIdentity == candidate.psk.identity else { return }
+
         let record = PairingRecord(
             id: candidate.payload.pairingID,
             secret: candidate.payload.secret,
@@ -370,6 +469,27 @@ final class PadlinkService: ObservableObject {
         pairingTimer?.invalidate()
         pairingTimer = nil
         self.candidate = nil
-        try? reloadAcceptedKeys()
+
+        // Announced before the reload, because the QR code on screen is a
+        // permanent credential from this moment on whatever happens next. The
+        // app watches this to take the window down. A counter rather than a
+        // flag, so a second pairing is a second event.
+        completedPairings += 1
+
+        do {
+            // The listener really does have to be rebuilt now, unlike before.
+            // While the window was open it accepted the candidate and nothing
+            // else, so every other paired device is locked out until this runs.
+            try reloadAcceptedKeys()
+            try restartListener()
+        } catch {
+            // Not a security failure, and nothing is dropped: the key the
+            // listener still holds is the pairing that just reached disk, so
+            // continuing to accept it is correct. What failed is re-reading the
+            // *other* pairings, which means those devices stay locked out.
+            // Visible rather than silent, because only the user can decide
+            // whether to retry or restart the app.
+            state = .failed("Paired, but could not reload pairings: \(Self.readable(error))")
+        }
     }
 }

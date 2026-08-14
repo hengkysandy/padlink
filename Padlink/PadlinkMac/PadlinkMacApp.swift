@@ -64,8 +64,19 @@ struct PadlinkMacApp: App {
             if let pairing {
                 PairingView(payload: pairing, expiresAt: pairingExpiry) {
                     service.cancelPairing()
-                    self.pairing = nil
-                    dismissWindow(id: "pairing")
+                    closePairingWindow()
+                }
+                // A stored pairing is not a pairing code any more: the same id
+                // and secret are now the iPad's permanent credential. Leaving
+                // the QR code up under a countdown that has already run out
+                // shows a live key to everyone in the room, and invites a
+                // second device to be pointed at a window that is finished.
+                //
+                // `cancelPairing()` is deliberately not called here. The
+                // candidate is already gone and the listener already rebuilt,
+                // so calling it would only rebuild a second time.
+                .onChange(of: service.completedPairings) { _, _ in
+                    closePairingWindow()
                 }
             }
         }
@@ -91,6 +102,21 @@ struct PadlinkMacApp: App {
         NSApplication.shared.activate()
     }
 
+    /// Takes the pairing code off the screen.
+    ///
+    /// Clearing `pairing` matters as much as dismissing: the window's content
+    /// is built from it, so a payload left behind would still be rendered, and
+    /// reopening the window would show a code that is no longer live.
+    private func closePairingWindow() {
+        // If "Copy pairing code" was used, take it back off the clipboard. The
+        // code is finished either way: paired means it is a stored credential
+        // that nobody needs to paste again, cancelled or expired means it is
+        // worthless.
+        if let pairing { PairingClipboard.clear(pairing) }
+        pairing = nil
+        dismissWindow(id: "pairing")
+    }
+
     private var menuIcon: String {
         if case .connected = service.state { return "keyboard.fill" }
         return "keyboard"
@@ -102,18 +128,18 @@ struct PadlinkMacApp: App {
             pairing = payload
             pairingExpiry = Date().addingTimeInterval(PadlinkService.pairingWindow)
 
-            // Also put the pairing URL on the clipboard, so the command line
-            // client can be paired with a paste and never needs this window.
-            // The window is for the iPad, which scans the QR code; on the Mac
-            // the URL is the useful half, and a window that fails to come
-            // forward should not be able to block pairing entirely.
+            // The code is deliberately *not* put on the clipboard here. It used
+            // to be, so the command line client could pair with a paste, back
+            // when the iPad could not scan. The iPad scans now, so the clipboard
+            // is no longer on the path anyone normally takes, and the clipboard
+            // is readable by every app on this machine. "Copy pairing code" in
+            // the window still puts it there when the user asks for it, which
+            // keeps `./padlink paste` working.
             //
-            // The clipboard is readable by other apps. Acceptable here: the key
-            // is single-use, expires in 120 seconds, and only grants control of
-            // this Mac from this network.
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(payload.urlString, forType: .string)
-
+            // The cost: if this window ever fails to come forward, there is no
+            // longer a copy waiting on the clipboard as a way through. The menu
+            // still shows the pairing state, and Cancel plus a second attempt
+            // is the recovery.
             showWindow("pairing")
         } catch {
             // The service has already put the reason into its `state`, which the

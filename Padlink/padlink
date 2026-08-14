@@ -89,8 +89,13 @@ case "$1" in
       # Matched by shape, not by column position: the Model column contains
       # spaces ("iPad Air (5th generation)"), so counting fields picks the
       # wrong one.
+      #
+      # Excluding "unavailable" rather than requiring "available", because a
+      # usable iPad reports several different states ("connected",
+      # "available (paired)"). Requiring one exact word made a perfectly
+      # healthy plugged-in iPad look like it was not there at all.
       DEVICE="$(xcrun devicectl list devices 2>/dev/null \
-        | grep -i 'ipad' | grep 'available' \
+        | grep -i 'ipad' | grep -v 'unavailable' \
         | grep -oE '[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}' \
         | head -1)"
     fi
@@ -124,8 +129,10 @@ case "$1" in
     ;;
 
   paste)
-    # Clicking "Pair a device" puts the URL on the clipboard, so pairing needs
-    # no copying by hand and no visible window.
+    # The pairing window's "Copy pairing code" button puts the URL on the
+    # clipboard. Clicking "Pair a device" no longer does it on its own: the
+    # clipboard is readable by every app, so a live key only goes there when
+    # somebody asks for it.
     URL_FROM_CLIPBOARD="$(pbpaste)"
     case "$URL_FROM_CLIPBOARD" in
       padlink://*)
@@ -133,7 +140,8 @@ case "$1" in
         ;;
       *)
         echo "The clipboard does not hold a pairing code."
-        echo "Click the menu bar icon, then 'Pair a device', then run this again."
+        echo "Click the menu bar icon, then 'Pair a device', then 'Copy pairing"
+        echo "code' in the window that opens, then run this again."
         exit 1
         ;;
     esac
