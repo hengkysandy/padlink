@@ -336,6 +336,17 @@ struct PadStateMachine {
 final class PadService: ObservableObject {
     @Published private(set) var state: PadState = .idle
 
+    /// The round trip to the Mac and back, in milliseconds, or nil before the
+    /// first pong of this connection.
+    ///
+    /// Published separately from `state` because it changes on its own clock:
+    /// folding it into `PadState` would make every heartbeat a state change and
+    /// force every rule in `PadStateMachine` to be written around a number that
+    /// decides nothing.
+    @Published private(set) var latencyMillis: Int?
+
+    private var latency = LatencyTracker()
+
     /// The paired Mac's display name, for the UI. Nil until a pairing loads.
     private(set) var pairedMacName: String?
 
@@ -595,6 +606,10 @@ final class PadService: ObservableObject {
             guard state.isConnected else { continue }
 
             seq &+= 1
+            // Timed from just before the send, so the figure includes
+            // everything the user actually waits for: encoding, the socket, the
+            // network, the Mac, and the way back.
+            latency.recordPing(seq: seq, at: Date.timeIntervalSinceReferenceDate)
             // A send that throws is itself evidence the link is gone, so the
             // ping is counted either way.
             try? await wrapped.send(ClientMessage.ping(seq: seq))
@@ -642,6 +657,14 @@ final class PadService: ObservableObject {
             guard connection === wrapped else { break }
             guard let message = try? ServerMessageCodec.decode(frame) else { continue }
             if case .helloAck = message { cancelHandshakeTimeout() }
+            // Timed here rather than in the state machine, which has no clock
+            // on purpose. The machine still sees the pong and still uses it to
+            // clear the missed-ping count; this only measures it on the way
+            // past.
+            if case let .pong(seq) = message {
+                latency.recordPong(seq: seq, at: Date.timeIntervalSinceReferenceDate)
+                latencyMillis = latency.milliseconds
+            }
             apply(.received(message))
         }
 
@@ -668,6 +691,11 @@ final class PadService: ObservableObject {
         // `self.connection` inside it would always see nil.
         let dying = connection
         connection = nil
+        // A new connection starts with no history. Carrying the old link's
+        // figure across would show it for the new one's first few seconds,
+        // which is exactly when somebody reconnecting is looking at it.
+        latency.reset()
+        latencyMillis = nil
         Task { await dying?.cancel() }
     }
 

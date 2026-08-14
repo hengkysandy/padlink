@@ -95,8 +95,17 @@ final class TrackpadCoordinator {
         for message in interpreter.releaseAll() {
             send(message)
         }
+        // The attached keyboard's modifiers too, for the same reason and by the
+        // same trigger. A `Cmd` held on the Mac while the user is looking at
+        // another app turns their next keystroke into a shortcut.
+        surface?.releaseHeldKeys()
         syncDisplayLink()
     }
+
+    /// The view this coordinator drives, so a release can reach the keyboard
+    /// state that lives on it. Weak, because the view owns the closure that
+    /// owns this.
+    weak var surface: TrackpadSurface?
 
     /// Runs the display link exactly while there is momentum to spend.
     ///
@@ -134,6 +143,10 @@ final class TrackpadCoordinator {
 /// timing that `dtMicros` needs.
 final class TrackpadSurface: UIView {
     var onTouches: ((TouchEvent) -> Void)?
+    /// Messages from a keyboard attached to the iPad.
+    var onKeyMessages: (([ClientMessage]) -> Void)?
+
+    private var hardwareKeyboard = HardwareKeyboardState()
 
     /// The line that follows the finger.
     ///
@@ -222,6 +235,76 @@ final class TrackpadSurface: UIView {
         trailLayer.lineWidth = 5
     }
 
+    // MARK: - A keyboard attached to the iPad
+
+    /// Required for `pressesBegan` to arrive at all. A view that cannot be first
+    /// responder is never offered a key event, and the failure is silence.
+    override var canBecomeFirstResponder: Bool { true }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // Claimed as soon as there is a window to claim it in, so an attached
+        // keyboard works without the user having to touch the glass first.
+        if window != nil { becomeFirstResponder() }
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // Taken back here as well, because anything else that becomes first
+        // responder (the text sheet, most obviously) takes it away, and there
+        // is no notification for getting it back. Touching the trackpad is the
+        // clearest possible statement that this is the surface in use.
+        if isFirstResponder == false { becomeFirstResponder() }
+        report(.began, touches, event)
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard handle(presses, isDown: true) else {
+            // Unhandled presses go up the chain rather than being swallowed, so
+            // system shortcuts still work on the iPad itself.
+            super.pressesBegan(presses, with: event)
+            return
+        }
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard handle(presses, isDown: false) else {
+            super.pressesEnded(presses, with: event)
+            return
+        }
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        // A cancelled press is a press whose release will never arrive, so
+        // everything held goes back. Without this a cancelled `Cmd` stays down
+        // on the Mac with no key left to release it.
+        super.pressesCancelled(presses, with: event)
+        releaseHeldKeys()
+    }
+
+    /// Returns true when at least one press was ours.
+    private func handle(_ presses: Set<UIPress>, isDown: Bool) -> Bool {
+        var messages: [ClientMessage] = []
+        var handled = false
+
+        for press in presses {
+            guard let key = press.key else { continue }
+            handled = true
+            messages += hardwareKeyboard.handle(
+                usage: key.keyCode,
+                characters: key.characters,
+                isDown: isDown
+            )
+        }
+
+        if messages.isEmpty == false { onKeyMessages?(messages) }
+        return handled
+    }
+
+    func releaseHeldKeys() {
+        let messages = hardwareKeyboard.releaseAll()
+        if messages.isEmpty == false { onKeyMessages?(messages) }
+    }
+
     private func applyTrailColors() {
         trailLayer.strokeColor = UIColor.label.withAlphaComponent(0.28).cgColor
         dotsLayer.fillColor = UIColor.label.withAlphaComponent(0.22).cgColor
@@ -301,10 +384,6 @@ final class TrackpadSurface: UIView {
         dotsLayer.add(fade, forKey: "fade")
     }
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        report(.began, touches, event)
-    }
-
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         report(.moved, touches, event)
     }
@@ -370,8 +449,14 @@ struct TrackpadView: UIViewRepresentable {
     func makeUIView(context: Context) -> TrackpadSurface {
         let surface = TrackpadSurface(frame: .zero)
         let coordinator = context.coordinator
+        coordinator.surface = surface
         surface.onTouches = { event in
             coordinator.deliver(event)
+        }
+        surface.onKeyMessages = { messages in
+            for message in messages {
+                coordinator.send(message)
+            }
         }
         return surface
     }

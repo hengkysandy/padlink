@@ -130,7 +130,8 @@ struct TrackpadScreen: View {
                 // trackpad screen, which is the one screen `AppRouter` allows
                 // to touch the network.
                 onRetry: { service.start() },
-                onPairAgain: { model.pairAgain() }
+                onPairAgain: { model.pairAgain() },
+                latencyMillis: service.latencyMillis
             )
 
             if keyboardVisible {
@@ -377,6 +378,7 @@ private struct StatusHeader: View {
     let status: PadStatus
     let onRetry: () -> Void
     let onPairAgain: () -> Void
+    let latencyMillis: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: isCalm ? 4 : 10) {
@@ -388,6 +390,19 @@ private struct StatusHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 Spacer(minLength: 8)
+
+                if let latencyMillis, status.level == .connected || status.level == .warning {
+                    // The round trip, live. It is the difference between "this
+                    // feels bad, the app is broken" and "this feels bad, the
+                    // Wi-Fi is busy", which from the outside look identical.
+                    //
+                    // Monospaced digits so a figure changing from 9 to 10 does
+                    // not shift the row, which reads as flicker.
+                    Text("\(latencyMillis) ms")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(latencyColor(latencyMillis))
+                        .accessibilityLabel("Round trip \(latencyMillis) milliseconds")
+                }
 
                 if status.level == .error || status.level == .idle {
                     Button("Try again", action: onRetry)
@@ -420,6 +435,17 @@ private struct StatusHeader: View {
 
     /// True only when there is nothing to act on.
     private var isCalm: Bool { status.level == .connected }
+
+    /// The thresholds come from the original design estimate of 20 to 40
+    /// milliseconds, which until now had never been checked against anything.
+    /// Green means the estimate held. Orange is noticeable if you look for it.
+    /// Red is a trackpad that feels wrong, and the number says so before the
+    /// user has to work out whether it is them.
+    private func latencyColor(_ millis: Int) -> Color {
+        if millis <= 40 { return .green }
+        if millis <= 90 { return .orange }
+        return .red
+    }
 
     private var headlineFont: Font {
         if isLoud { return .title3.weight(.bold) }
