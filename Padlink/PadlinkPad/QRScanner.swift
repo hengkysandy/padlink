@@ -29,17 +29,36 @@ extension CameraPermission {
 
 /// The `AVCaptureSession` and everything that touches it.
 ///
-/// `@unchecked Sendable` because AVFoundation carries no concurrency
-/// annotations, so `AVCaptureSession` is not `Sendable` and cannot be captured
-/// by the background queue that `startRunning()` has to run on. The unchecked
-/// promise is kept by confinement: `session` is only ever configured, started,
-/// and stopped on `queue`, and the preview layer holds it on the main thread
-/// without mutating it.
+/// ## Why this is `@unchecked Sendable`
+///
+/// AVFoundation carries no concurrency annotations, so `AVCaptureSession` is not
+/// `Sendable` and cannot be captured by the background queue that
+/// `startRunning()` has to run on. That queue is not optional: `startRunning()`
+/// blocks, sometimes for most of a second, and on the main thread that is a
+/// frozen app. An actor would not do instead, because its blocking call would
+/// occupy a cooperative pool thread, and because `makeUIView` needs `session`
+/// synchronously to attach it to the preview layer.
+///
+/// So the unchecked promise stays, but it is now narrow enough to state exactly.
+/// Every piece of mutable state in this class sits in one of two homes, and the
+/// compiler proves membership of the first one:
+///
+/// - **Main actor**, declared with `@MainActor`: `onCode`, `onFailure`, and
+///   `codeFilter`. Written by `updateUIView`, read by the metadata callback,
+///   which AVFoundation delivers on the main queue by arrangement below.
+/// - **`queue`**, by confinement: `session` and `isConfigured`. Reached only
+///   through `startOnQueue` and `stopOnQueue`, each of which asserts it is on
+///   `queue` before touching anything. The preview layer holds `session` on the
+///   main thread but never mutates it.
+///
+/// The thing this replaced was a single `lastCode` string written from both
+/// homes at once. See `ScanCodeFilter` for what it did and why it was not just
+/// a logic problem.
 final class QRScanSession: NSObject, AVCaptureMetadataOutputObjectsDelegate, @unchecked Sendable {
-    /// The text of a scanned code. Called on the main actor.
-    var onCode: ((String) -> Void)?
-    /// The camera could not be set up at all. Called on the main actor.
-    var onFailure: ((String) -> Void)?
+    /// The text of a scanned code.
+    @MainActor var onCode: ((String) -> Void)?
+    /// The camera could not be set up at all.
+    @MainActor var onFailure: ((String) -> Void)?
 
     /// The camera this app would use, or nil. On the simulator this is always
     /// nil, which is the answer `ScanPlan` needs before it decides anything.
@@ -53,48 +72,64 @@ final class QRScanSession: NSObject, AVCaptureMetadataOutputObjectsDelegate, @un
     /// thread that is a frozen app, so every call into the session goes here.
     private let queue = DispatchQueue(label: "com.hengkysandy.padlink.camera")
 
+    /// Confined to `queue`, alongside `session`.
     private var isConfigured = false
 
-    /// The last code handed upwards.
-    ///
-    /// `AVCaptureMetadataOutput` reports the same code in every frame it can
-    /// see it in, which is dozens a second. `PairingIntake` latches after a
-    /// success, but a code it rejects is not latched, so without this a QR code
-    /// that is not a Padlink code would re-run the parse and rewrite the error
-    /// message forty times a second for as long as it stayed in frame.
-    ///
-    /// Cleared by `stop()`, so leaving the pairing screen and coming back reads
-    /// the same code again.
-    private var lastCode: String?
+    /// Which scanned codes are worth acting on. Main-actor state, so the
+    /// metadata callback and the start/stop calls cannot touch it at once.
+    @MainActor private var codeFilter = ScanCodeFilter()
 
     // MARK: - Running
 
+    /// Called from `updateUIView`, which is main-actor isolated.
+    @MainActor
     func start() {
-        queue.async { [self] in
-            if isConfigured == false {
-                if let problem = configure() {
-                    report(problem)
-                    return
-                }
-                isConfigured = true
-            }
-            guard session.isRunning == false else { return }
-            session.startRunning()
-        }
+        // Before the hop, and on the main actor, which is the only place this
+        // state may be touched.
+        codeFilter.resume()
+        queue.async { [self] in startOnQueue() }
     }
 
+    /// Called from `updateUIView` and from `dismantleUIView`. Safe to call
+    /// twice, and safe to call on a session that never started.
+    @MainActor
     func stop() {
-        queue.async { [self] in
-            lastCode = nil
-            guard session.isRunning else { return }
-            session.stopRunning()
+        // Synchronous, and first. From this line on, no code reaches the app,
+        // including frames AVFoundation has already queued on the main queue and
+        // is about to deliver.
+        codeFilter.suspend()
+        queue.async { [self] in stopOnQueue() }
+    }
+
+    // MARK: - The queue's own state
+
+    private func startOnQueue() {
+        dispatchPrecondition(condition: .onQueue(queue))
+
+        if isConfigured == false {
+            if let problem = configure() {
+                report(problem)
+                return
+            }
+            isConfigured = true
         }
+        guard session.isRunning == false else { return }
+        session.startRunning()
+    }
+
+    private func stopOnQueue() {
+        dispatchPrecondition(condition: .onQueue(queue))
+
+        guard session.isRunning else { return }
+        session.stopRunning()
     }
 
     // MARK: - Setup
 
     /// Returns a sentence describing what went wrong, or nil on success.
     private func configure() -> String? {
+        dispatchPrecondition(condition: .onQueue(queue))
+
         guard let device = AVCaptureDevice.default(for: .video) else {
             // Reached only if the camera disappears between `hasCamera` and
             // here. The simulator never gets this far, because `ScanPlan`
@@ -164,10 +199,10 @@ final class QRScanSession: NSObject, AVCaptureMetadataOutputObjectsDelegate, @un
         }
 
         // Safe because `setMetadataObjectsDelegate` above was handed
-        // `DispatchQueue.main`, so this really is the main thread.
+        // `DispatchQueue.main`, so this really is the main thread. Everything
+        // touched inside is main-actor state, and the compiler checks that now.
         MainActor.assumeIsolated {
-            for value in codes where value != lastCode {
-                lastCode = value
+            for value in codeFilter.accept(codes) {
                 onCode?(value)
             }
         }
