@@ -108,5 +108,3 @@ default, which is why the iPad side has never prompted you.
 | Cursor does not move, no banner at all | Not connected. Look at the banner text for the reason. |
 | Password prompt on every Mac app launch | Stale keychain access list. Click Always Allow. |
 | Accessibility toggle on, Mac still says denied | Stale TCC records from rebuilds. Run `tccutil reset`. |
-</content>
-</invoke>

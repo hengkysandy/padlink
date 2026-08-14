@@ -168,5 +168,3 @@ sent us hunting a bug that did not exist.
 More than twenty were found by the people implementing them, including a security
 error and a missing-key crash. The plans were still worth writing, and the
 implementers were still right to check rather than comply.
-</content>
-</invoke>

@@ -112,7 +112,13 @@ struct TrackpadScreen: View {
                     // here", and this rectangle is the entire app.
                     // `allowsHitTesting(false)` so the label never swallows the
                     // first touch of a drag.
-                    Text("Drag here to move your Mac's cursor. Two fingers to scroll.")
+                    // Four gestures, not twelve. The list exists so the surface
+                    // does not look like a blank rectangle, and a list long
+                    // enough to be a reference is one nobody reads. The rest
+                    // are in the learning docs.
+                    Text("Drag to move the cursor. Two fingers to scroll, "
+                        + "two to tap for a right click, pinch to zoom.")
+                        .multilineTextAlignment(.center)
                         .font(.callout)
                         .foregroundStyle(.tertiary)
                         .allowsHitTesting(false)

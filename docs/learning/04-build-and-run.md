@@ -127,5 +127,3 @@ back to back from the same snapshot**, or they silently drift apart:
 ```bash
 ./padlink up && ./padlink pad
 ```
-</content>
-</invoke>

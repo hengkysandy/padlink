@@ -18,26 +18,23 @@ keyboard and trackpad that drives the MacBook.
 moves the Mac's cursor, types, and left-clicks. Verified by the user, not inferred
 from tests. Everything below is hardening and polish, not "make it work".
 
-Branch `worktree-padlink-mac`, not yet merged to `main`. Suites: Core 114,
-PadlinkMac 66, PadlinkPadTests 231.
+Branch `worktree-padlink-mac`. Suites: **Core 120, PadlinkMac 102,
+PadlinkPadTests 320.**
 
-Not yet exercised by hand (all built and unit-tested, none confirmed on device):
-- [ ] Two-finger scroll. The least-tested feature in the app: the simulator
-      physically cannot produce the gesture, so the iPad is its first real test.
-- [ ] Right click, drag to select text, held modifiers surviving (`Cmd-Tab`).
+Every review finding is now fixed and every planned feature is built. What is
+left is hand testing on the device, which no test can stand in for.
+
+Not yet exercised by hand:
+- [ ] Two-finger scroll, and the whole new gesture set. The simulator physically
+      cannot produce a multi-finger gesture, so the iPad is its first real test.
+- [ ] Right click (two-finger tap), pinch to zoom, three- and four-finger swipes.
+- [ ] The on-screen keyboard, and a locked modifier surviving several keys
+      (`Cmd` locked, then `Tab` `Tab` `Tab`).
+- [ ] Drag to select text.
 - [ ] A real Wi-Fi drop, to confirm the heartbeat notices in ~6s.
 
-Security findings from the branch review, none fixed yet (see tasks 36-41):
-- [ ] Any connection during a pairing window promotes the candidate. Nothing
-      checks the device used the key that was actually scanned.
-- [ ] The pairing window never closes on success, and the key goes on the
-      system clipboard unconcealed (so clipboard managers and Universal
-      Clipboard keep it).
-- [ ] Held **key codes** are untracked, so a dropped connection cannot release
-      a stuck letter key. Buttons and modifiers are handled; keys are not.
-- [ ] `QRScanSession.lastCode` is mutated from two queues.
-- [ ] Move the Mac to the data protection keychain, to end the login-password
-      prompts caused by legacy per-item access lists.
+The iPad build expires **2026-08-20** (free account, 7 day profile). Re-run
+`./padlink pad` to renew.
 
 Then: merge to `main` and push.
 
@@ -696,3 +693,61 @@ Commit `011a47a`. Full write-up: `.superpowers/sdd/pairing-security-report.md`.
 - **Two agents were editing this worktree at once today.** Do not do that again.
 
 ## 2026-08-14 12:56 — (auto session marker)
+
+## 2026-08-14 — Salvaged four killed agents, then finished the feature work
+
+**Session limit killed all four parallel agents mid-task.** Their worktrees
+survived, so nothing was lost. Three had complete work, one had 21 lines of test
+helpers and was discarded.
+
+- `agent-a1cb729a6ad6f7876` (held keys + handshake gate). Reported "my restore
+  helper replaced an empty string" before dying. Confirmed: `HeldInputState.swift`
+  had gone from 62 lines to 4044, with `        heldKeys.removeAll()` woven
+  between every single character of the file. Tests and the router change were
+  untouched, and they fully specified the intended behaviour, so the fix was
+  `git checkout` the one file and re-apply by hand rather than un-mangle it.
+- `agent-ab8b8190cd88b97a7` (QR scanner data race). Complete. Extracted
+  `ScanCodeFilter`, moved the callbacks to `@MainActor`, confined the session to
+  its queue with `dispatchPrecondition`.
+- `agent-aac6c329cdb78d7cc` (keyboard engine). Complete, engine only, no view.
+- `agent-a30b3c4444709e1c6` (gestures). Nothing usable. Redone by hand.
+
+Merged all three into `worktree-padlink-mac`, then built the rest directly.
+
+**Lesson recorded:** an agent's own last message understated what it had done in
+two of the four cases. Reading the worktree beat trusting the report.
+
+### What shipped
+
+- Held key codes are tracked and released, so a drop mid-keystroke cannot leave
+  a letter repeating on the Mac.
+- Input now requires `hello` on the connection. A peer that skips it gets the
+  socket closed, not ignored: ignoring would let it hold the single connection
+  slot forever and keep the real iPad out.
+- Gestures: two-finger tap right clicks, pinch zooms, three- and four-finger
+  swipes, momentum scrolling. macOS has no public API for synthesizing a real
+  pinch or swipe, so a zoom is Command-scroll and a swipe is a keyboard
+  shortcut. No protocol change needed.
+- On-screen keyboard with three layouts, MacBook as the default, remembered
+  across launches.
+
+### Two bugs the tests caught in the new gesture code
+
+- A third finger landing ended the two-finger gesture with no travel and no time
+  elapsed, which looks exactly like a tap. Every three-finger swipe would have
+  opened a context menu before it started.
+- A scroll paused before lifting kept the speed it had a second earlier and
+  coasted away on it, because a still finger still produces `.moved` events.
+
+### Two more found by asking where a locked modifier could outlive its display
+
+- Backgrounding does not close the connection (`PadService` only makes a note),
+  so a locked Command stayed held on the Mac while the user was in another app.
+- Switching to the "Trackpad only" layout removed the keyboard while the Mac was
+  still holding what it had locked, with nothing left to tap to release it.
+
+### Housekeeping
+
+- All seven `docs/learning/*.md` files ended with two lines of stray tool markup
+  (`</content>` and `</invoke>`) from how they were written last session.
+  Stripped. Added `07-gestures-and-keyboard.md`.

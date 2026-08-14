@@ -108,5 +108,3 @@ reconnection logic, and it means every timing rule is tested with no timers at a
 It exists so the Mac app could be developed and tested before the iPad app
 existed. It is also the fastest way to check whether a problem is in the Mac side
 or the iPad side: if the test client can move the cursor, the Mac is fine.
-</content>
-</invoke>

@@ -140,5 +140,3 @@ Management, tap your developer account, tap Trust.
 
 **The app stops opening after a week.** The provisioning profile expired. Rerun
 `./padlink pad`.
-</content>
-</invoke>

@@ -29,6 +29,7 @@ Full explanation in [01-apple-signing.md](01-apple-signing.md).
 | [04-build-and-run.md](04-build-and-run.md) | The `padlink` script, the git worktree, XcodeGen, running the tests |
 | [05-gotchas.md](05-gotchas.md) | Every trap we hit, with the symptom that led us there |
 | [06-how-the-code-fits.md](06-how-the-code-fits.md) | The shape of the codebase and why it is split that way |
+| [07-gestures-and-keyboard.md](07-gestures-and-keyboard.md) | Every gesture, the on-screen keyboard, and how the modifier keys behave |
 
 ## The 60 second version
 
@@ -45,6 +46,10 @@ cd /Users/hengkysandy/claude-chats/first-mobile-app/.claude/worktrees/padlink-ma
 Then on the Mac, click the keyboard icon in the menu bar, choose "Pair a device",
 and point the iPad camera at the code. Drag on the iPad, the Mac's cursor moves.
 
+Two fingers scroll, two fingers tap to right click, pinch to zoom, three and four
+fingers swipe. The full list is in
+[07-gestures-and-keyboard.md](07-gestures-and-keyboard.md).
+
 **The directory matters.** The app lives on a git branch in a worktree, not on
 `main`. Running these from `first-mobile-app/Padlink` fails, because the app does
 not exist there. See [04-build-and-run.md](04-build-and-run.md).
@@ -56,5 +61,3 @@ MacBook, over Wi-Fi. Pairing is by QR code, and the link is encrypted with a
 pre-shared key.
 
 Reached working end to end on real hardware on 2026-08-14.
-</content>
-</invoke>

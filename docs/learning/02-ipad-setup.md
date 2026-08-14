@@ -103,5 +103,3 @@ It cannot test:
 
 That last point matters most. The only question that finally counts is whether it
 feels responsive under your finger, and only hardware can answer it.
-</content>
-</invoke>
