@@ -8,6 +8,7 @@
 #
 #   ./padlink team <ID>          set your Apple team id, once
 #   ./padlink up                 build and launch the Mac app
+#   ./padlink pad                build and launch on the physical iPad
 #   ./padlink paste              pair using the code on the clipboard
 #   ./padlink pair "<url>"       pair with a code you have as text
 #   ./padlink move 200 0         and every other test client command
@@ -73,6 +74,53 @@ case "$1" in
 
   down)
     osascript -e 'quit app "PadlinkMac"' 2>/dev/null && echo "Quit." || echo "Was not running."
+    ;;
+
+  pad)
+    # Build, install, and launch on the physical iPad.
+    #
+    # The device id is looked up rather than written down. It identifies one
+    # person's hardware, and this repository is public. `.padlink-device`
+    # overrides the lookup when more than one iPad is attached; it is
+    # gitignored for the same reason.
+    if [ -f .padlink-device ]; then
+      DEVICE="$(tr -d '[:space:]' < .padlink-device)"
+    else
+      # Matched by shape, not by column position: the Model column contains
+      # spaces ("iPad Air (5th generation)"), so counting fields picks the
+      # wrong one.
+      DEVICE="$(xcrun devicectl list devices 2>/dev/null \
+        | grep -i 'ipad' | grep 'available' \
+        | grep -oE '[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}' \
+        | head -1)"
+    fi
+    if [ -z "$DEVICE" ]; then
+      echo "No available iPad found."
+      echo "Plug it in and unlock it, then check: xcrun devicectl list devices"
+      exit 1
+    fi
+    if [ ${#SIGNING[@]} -eq 0 ]; then
+      echo "No team id set. A physical iPad will not run an ad-hoc signed build."
+      echo "Run: ./padlink team <YOUR_TEAM_ID>"
+      exit 1
+    fi
+
+    echo "Building for the iPad..."
+    # A separate derived data path from the Mac build. Sharing one makes every
+    # switch between Mac and device a full rebuild.
+    xcodebuild -scheme PadlinkPad -destination "id=$DEVICE" \
+      -derivedDataPath .build-device "${SIGNING[@]}" build -quiet 2>&1 \
+      | grep -v "^--- xcodebuild: WARNING" || true
+
+    APP_PAD=".build-device/Build/Products/Debug-iphoneos/PadlinkPad.app"
+    echo "Installing..."
+    xcrun devicectl device install app --device "$DEVICE" "$APP_PAD" > /dev/null
+    xcrun devicectl device process launch --device "$DEVICE" \
+      com.hengkysandy.padlink.pad > /dev/null
+    echo ""
+    echo "Launched on the iPad."
+    echo "If iOS says the developer is not trusted, open Settings, then"
+    echo "General, then VPN & Device Management, and trust the certificate."
     ;;
 
   paste)

@@ -42,6 +42,8 @@ Padlink/PadlinkPad/Info.plist
 
 # Apple team id for local signing. Account-specific, not for a public repo.
 .padlink-team
+# Identifies one person's iPad, and this repository is public.
+.padlink-device
 
 # Device builds, and the journal stub a session hook writes when cwd is Padlink/.
 # The real journal lives at the repository root.
