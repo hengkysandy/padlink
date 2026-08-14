@@ -448,9 +448,11 @@ Suites: Core 107, PadlinkMac 49, PadlinkPadTests 18.
 
 ## TODO when resuming
 
-1. Tasks 3-5 (MacBrowser, PadPairingStore, PadService) were dispatched and may have
-   landed. Check `git log` and `.superpowers/sdd/ipad-task-3-5-report.md` first.
-2. Then Task 6, `TrackpadView`, which is the actual point of the app.
+1. Tasks 3-5 (MacBrowser, PadPairingStore, PadService) and Task 6 (`TrackpadView`) have
+   landed. Reports: `.superpowers/sdd/ipad-task-3-5-report.md`,
+   `.superpowers/sdd/ipad-task-6-report.md`.
+2. `TrackpadView` is built but not placed in any screen yet. Task 8 wires it to
+   `padService.send`.
 3. Then Tasks 7-8: QR scanning plus a paste field (the simulator has no camera, so the
    paste field is the development path, not a fallback), and the main screen wiring.
 4. Test in the simulator first: it shares the Mac's network so Bonjour works. Then the
@@ -481,3 +483,34 @@ Suites: Core 107, PadlinkMac 49, PadlinkPadTests 18.
 - Not verified without hardware: the local network denial itself (the simulator does
   not enforce the permission), real Bonjour discovery, and a real rejected key.
 - Report: `.superpowers/sdd/ipad-task-3-5-report.md`.
+
+## 2026-08-14 — iPad plan Task 6 (the trackpad itself)
+
+- Split into two files, not the one the plan names. `Padlink/PadlinkPad/TouchInterpreter.swift`
+  holds every decision and imports no UIKit; `Padlink/PadlinkPad/TrackpadView.swift` is the
+  `UIViewRepresentable` shell plus `TrackpadSurface` and `TrackpadCoordinator`.
+  `UITouch` cannot be constructed, so a view full of `touchesBegan` is untestable.
+- `TouchInterpreter` is a class, so its single `MoveThrottle` (a struct with a sub-pixel
+  accumulator) cannot be forked by a copy.
+- Thresholds: tap <= 0.25 s and <= 10 points from the furthest point reached;
+  tap-then-drag chains within 0.3 s. All three under the Mac's 0.5 s double click
+  interval, so a chained drag still selects by word.
+- Scroll is natural (content follows the fingers): the centroid delta passes through
+  with its sign unchanged on both axes. Own sub-pixel accumulator and own `Int16` clamp,
+  because scroll does not go through `MoveThrottle`.
+- Any change in the number of fingers ends one gesture and starts another with a fresh
+  baseline, and reports no movement of its own. That is what stops the cursor jumping.
+- Suites after: Core 107, PadlinkMac 49, PadlinkPadTests **139** (was 95).
+  Command: `./padlink test`.
+- 14 mutations applied one at a time, all 14 caught, sources restored and verified by
+  SHA-256. None were caught by the compiler.
+- Defects found: `UIView.isMultipleTouchEnabled` defaults to false, so without setting it
+  two-finger scroll never happens at all (missing from the brief's trap list); a
+  two-finger tap lifts one finger first, so the leftover finger would left-click unless
+  it is marked not tap-eligible; `ClientMessage.scroll` needs its own clamp, which the
+  plan only discusses for `pointerMove`. Also fixed in my own shell: `UIEvent.allTouches`
+  lists touches from other views, which would turn a drag into a scroll.
+- Not verifiable without hardware: real multi-touch (the simulator's Option-key gesture
+  is a symmetric pinch, whose centroid barely moves), the scroll sign, and whether
+  `touchesCancelled` fires when the app backgrounds mid-drag.
+- Report: `.superpowers/sdd/ipad-task-6-report.md`.
