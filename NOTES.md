@@ -514,3 +514,47 @@ Suites: Core 107, PadlinkMac 49, PadlinkPadTests 18.
   is a symmetric pinch, whose centroid barely moves), the scroll sign, and whether
   `touchesCancelled` fires when the app backgrounds mid-drag.
 - Report: `.superpowers/sdd/ipad-task-6-report.md`.
+
+## 2026-08-14 — Tasks 7 and 8: the iPad's views
+
+Built the SwiftUI/UIKit shells over the already-committed decision layer. All new,
+all untracked except `PadlinkPadApp.swift`:
+
+- `PadlinkPad/QRScanner.swift` — `AVCaptureSession` + `AVCaptureMetadataOutput`.
+  `metadataObjectTypes` is set **after** `addOutput` (before it, the preview runs and
+  never detects anything). `startRunning()` runs on a private serial queue.
+  De-duplicates repeat reads of the same code; stops on the first success and in
+  `dismantleUIView`.
+- `PadlinkPad/PairingScreen.swift` — driven by `ScanPlan.step(...)`. Paste field is
+  first and prominent when there is no camera.
+- `PadlinkPad/LocalNetworkNoticeScreen.swift`
+- `PadlinkPad/TrackpadScreen.swift` — `TrackpadView`, `PadStatus` header, typing bar.
+- `PadlinkPad/TypingField.swift` — `UITextField` subclass. Backspace goes through a
+  `deleteBackward()` override, not the delegate: UIKit does not call
+  `shouldChangeCharactersIn` when there is nothing to delete, and this field is always
+  empty. All rewrite traits off (autocorrect, autocaps, smart quotes/dashes, inline
+  prediction, math completion, Writing Tools).
+- `PadlinkPad/PadlinkPadApp.swift` — placeholder replaced; owns `AppModel`, switches on
+  `screen`, wires `scenePhase`.
+- `PadlinkPadTests/TypingFieldTests.swift` — 12 tests, only over real new logic.
+
+Verified:
+- `xcodebuild -scheme PadlinkPad -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M4)' build` — succeeds, no warnings.
+- Installed and launched with `xcrun simctl install/launch booted com.hengkysandy.padlink.pad`.
+  Shows the pairing screen, still alive after 4 s, no crash.
+- Suites: Core 107, PadlinkMac 49, PadlinkPadTests 219 (was 207).
+- 6 mutations on the new tests, all killed.
+- Screenshotted the notice screen and the trackpad screen (warning and error states)
+  by temporarily forcing `RootView`'s switch and `TrackpadScreen.status`. **Both
+  overrides have been reverted**; the tree holds no debug state.
+
+Found while screenshotting: the trackpad surface is `secondarySystemBackground`, which
+is the same grey as `systemGroupedBackground` in light mode, so the one thing the user
+is meant to touch was invisible. Root background changed to `systemBackground`, and the
+trackpad now has a rounded border and a hint label.
+
+## TODO when resuming (tasks 7/8)
+- Nothing is committed yet. `git status` shows 5 new files plus `PadlinkPadApp.swift`.
+- Still to do: write `.superpowers/sdd/ipad-task-7-8-views-report.md` and commit.
+- Not verified: the camera path end to end, the local network prompt, and pairing by
+  paste (the simulator cannot be tapped from the CLI). All need a device or a person.
