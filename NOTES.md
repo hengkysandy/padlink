@@ -13,14 +13,33 @@ keyboard and trackpad that drives the MacBook.
 - SwiftUI
 
 ## TODO when resuming
-- [x] Finish brainstorming (architectural path, superpowers:brainstorming)
-- [x] Write design spec: `docs/superpowers/specs/2026-08-13-padlink-design.md` (committed, a19342d)
-- [ ] **User to review the spec**
-- [x] Implementation plan for Core: `docs/superpowers/plans/2026-08-13-padlink-core.md`
-- [ ] **Execute Plan 1 (PadlinkCore)**, starting with Task 0, the TLS-PSK spike
-- [ ] Plan 2 (macOS app) and Plan 3 (iPadOS app), written after Core exists
-- [ ] User must run once: `sudo xcode-select -s /Applications/Xcode.app`
-- [ ] Decide whether to update project `CLAUDE.md` (it still says this is not a code repo)
+
+**2026-08-14: the end goal is met.** On real hardware, over real Wi-Fi, the iPad
+moves the Mac's cursor, types, and left-clicks. Verified by the user, not inferred
+from tests. Everything below is hardening and polish, not "make it work".
+
+Branch `worktree-padlink-mac`, not yet merged to `main`. Suites: Core 114,
+PadlinkMac 66, PadlinkPadTests 231.
+
+Not yet exercised by hand (all built and unit-tested, none confirmed on device):
+- [ ] Two-finger scroll. The least-tested feature in the app: the simulator
+      physically cannot produce the gesture, so the iPad is its first real test.
+- [ ] Right click, drag to select text, held modifiers surviving (`Cmd-Tab`).
+- [ ] A real Wi-Fi drop, to confirm the heartbeat notices in ~6s.
+
+Security findings from the branch review, none fixed yet (see tasks 36-41):
+- [ ] Any connection during a pairing window promotes the candidate. Nothing
+      checks the device used the key that was actually scanned.
+- [ ] The pairing window never closes on success, and the key goes on the
+      system clipboard unconcealed (so clipboard managers and Universal
+      Clipboard keep it).
+- [ ] Held **key codes** are untracked, so a dropped connection cannot release
+      a stuck letter key. Buttons and modifiers are handled; keys are not.
+- [ ] `QRScanSession.lastCode` is mutated from two queues.
+- [ ] Move the Mac to the data protection keychain, to end the login-password
+      prompts caused by legacy per-item access lists.
+
+Then: merge to `main` and push.
 
 ## 2026-08-13 — Session 1 start
 - Read the video transcript. Confirmed the concept: iOS/Android client + Mac/Windows
@@ -597,3 +616,44 @@ Branch `worktree-padlink-mac`. Full write-up: `.superpowers/sdd/heartbeat-report
   And held key codes are still untracked in `MessageRouter`, so a stuck letter key
   cannot be released (modifiers are fine, they use the absolute `modifierState`).
 - 26 mutations run, one at a time, all caught, every restore verified by SHA-256.
+
+## 2026-08-14 — IT WORKS. iPad drives the Mac, on real hardware.
+
+The stated end goal, met: "my ipad can connect to macbook and control keyboard
+and touchpad". User confirmed cursor movement, typing, and left click on the
+physical iPad Air 5 over Wi-Fi.
+
+**What real hardware proved that the simulator could not:** Bonjour discovery
+over actual Wi-Fi, the TLS-PSK handshake, camera QR scanning, and the pairing
+key surviving in the iPad Keychain.
+
+**Three failures hit on the way, all diagnosed correctly and none of them bugs
+in the app:**
+
+1. *Protocol version mismatch.* The iPad build carried protocol v2 (heartbeat
+   work), the running Mac app was a v1 binary. The app said so in plain words
+   naming both versions. Fixed by rebuilding both from one snapshot. Lesson:
+   while an agent holds the tree dirty, build **both** apps back to back or
+   they silently diverge.
+
+2. *Repeated Mac keychain password prompts.* Not keychain locking (checked:
+   `no-timeout`, unlocked). The pairing item was first written by an **ad-hoc
+   signed** build; macOS binds each item's ACL to the creating identity, so the
+   now team-signed app was a stranger to its own data. Fix: "Always Allow" once.
+   Durable fix queued (task 41): data protection keychain, now possible because
+   the ad-hoc blocker is gone.
+
+3. *Accessibility toggle showed ON while the Mac reported denied.* Each
+   `./padlink up` does `rm -rf` + `cp -R`, orphaning the grant.
+   `tccutil reset Accessibility com.hengkysandy.padlink.mac` reported success
+   **three times**, one stale record per rebuild, while the UI showed a single
+   toggle. Fix: reset, relaunch, re-add.
+
+**Payoff worth remembering:** the orange "Connected, but your Mac is ignoring
+it" banner did its job. Without it this would have looked like a dead app with
+a healthy connection, which is the single most confusing failure in this
+project and had already cost time twice.
+
+Suites verified independently after the heartbeat commit: Core 114,
+PadlinkMac 66, PadlinkPadTests 231. Commits: 3278f92 (heartbeat + live
+accessibility + the Critical stuck-button fix), d0b8265 (`./padlink pad`).
