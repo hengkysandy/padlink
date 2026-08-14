@@ -5,6 +5,15 @@ import Network
 import PadlinkCore
 import Security
 
+/// What the read loop did with a message that drives input.
+enum InputDisposition: Equatable {
+    /// Handed to the synthesizer.
+    case routed
+    /// The peer tried to drive input before it sent `hello`. Nothing was
+    /// synthesized, and the connection must be torn down.
+    case rejectedBeforeHandshake
+}
+
 enum ServiceState: Equatable {
     case idle
     case pairing(expiresAt: Date)
@@ -302,7 +311,13 @@ final class PadlinkService: ObservableObject {
     }
 
     private func readLoop(_ wrapped: PadlinkConnection, acceptedIdentity: Data?) async {
-        for await frame in await wrapped.incoming {
+        // Per connection, and deliberately a local rather than a property on
+        // self. A superseded connection's read loop outlives `self.connection`,
+        // so a stored flag would describe the wrong session exactly when it
+        // matters, in the same way `acceptedIdentity` would.
+        var helloReceived = false
+
+        readLoop: for await frame in await wrapped.incoming {
             // A successor may have superseded this connection while a frame
             // was already sitting in the stream's buffer. Stop processing as
             // soon as that is true, rather than only at the end of the loop,
@@ -321,6 +336,7 @@ final class PadlinkService: ObservableObject {
 
             switch message {
             case let .hello(_, deviceName):
+                helloReceived = true
                 state = .connected(deviceName: deviceName)
                 // Reported so the iPad can say "grant Accessibility on your
                 // Mac" instead of appearing broken when nothing happens.
@@ -345,12 +361,60 @@ final class PadlinkService: ObservableObject {
                 try? await wrapped.send(ServerMessage.pong(seq: seq))
 
             default:
-                router.handle(message)
+                guard deliverInput(message, helloReceived: helloReceived) == .routed else {
+                    // Closed, not ignored. Ignoring bounds nothing: the
+                    // watchdog above counts *any* frame as proof of life, so a
+                    // peer that streams pointer messages and never says hello
+                    // would hold the single connection slot for as long as it
+                    // liked, and `accept()` gives that slot to whoever
+                    // connects last. Ignoring would turn "drives input without
+                    // a handshake" into "keeps the real iPad out", which is
+                    // worse, not better.
+                    //
+                    // Closing is also what the codebase already does to a peer
+                    // that gets the protocol wrong: an oversized frame sets
+                    // `CloseReason.framingViolation` and `PadlinkConnection`
+                    // cancels the socket there and then. A message arriving
+                    // out of order is the same class of fault, so it gets the
+                    // same answer.
+                    //
+                    // Nothing legitimate is broken by this. Both the iPad
+                    // (`PadService.runSession`) and the test client send
+                    // `hello` as the first frame after `start()`.
+                    await wrapped.cancel()
+                    // Labelled, because a bare `break` inside a `switch` binds
+                    // to the `switch`. Without the label the loop would keep
+                    // draining frames the peer had already buffered, and
+                    // reject each one again.
+                    break readLoop
+                }
             }
         }
 
         let reason = await wrapped.closeReason
         endSession(isCurrentConnection: connection === wrapped, reason: reason)
+    }
+
+    /// The read loop's input path, with the socket left out.
+    ///
+    /// Nothing may drive the cursor or the keyboard until the peer has sent
+    /// `hello` on this connection. Without that gate a device can connect on a
+    /// pairing candidate's key, never say `hello`, and so never reach
+    /// `promoteCandidateIfNeeded`, let the 120 second window expire, and keep
+    /// controlling the Mac from a session that was never recorded as a pairing
+    /// anywhere. Nothing in the app would list it, and nothing could revoke it.
+    ///
+    /// It takes a valid pre-shared key to get this far, so this is a paired
+    /// device misbehaving rather than an outsider. That is still worth closing:
+    /// the handshake is what turns a socket into a session, and what makes the
+    /// pairing bookkeeping true.
+    ///
+    /// Internal rather than private so it can be tested without a socket, in
+    /// the same way as `endSession` and `promoteCandidateIfNeeded`.
+    func deliverInput(_ message: ClientMessage, helloReceived: Bool) -> InputDisposition {
+        guard helloReceived else { return .rejectedBeforeHandshake }
+        router.handle(message)
+        return .routed
     }
 
     /// The tail of a read loop: a connection has ended, for any reason.

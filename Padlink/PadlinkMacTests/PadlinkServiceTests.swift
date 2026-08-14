@@ -89,6 +89,179 @@ final class PadlinkServiceTests: XCTestCase {
         )
     }
 
+    // MARK: - Releasing a held key when a connection ends
+    //
+    // The same class of failure as the stuck mouse button above, reached the
+    // same three ways. A key down and its matching key up are two separate
+    // frames, so a connection dying between them leaves the key down at the
+    // HID level and the Mac repeats that character with nothing to stop it.
+
+    /// Builds a service over a router the test can inspect, with the A key
+    /// already down and never released, which is what a connection dying
+    /// between a key down and its key up leaves behind.
+    private func serviceHoldingAKey() -> (PadlinkService, RecordingSynthesizer) {
+        let synthesizer = RecordingSynthesizer()
+        let router = MessageRouter(
+            synthesizer: synthesizer,
+            geometry: ScreenGeometry(topLeftFrames: [CGRect(x: 0, y: 0, width: 1440, height: 900)])
+        )
+        let service = PadlinkService(
+            store: InMemoryPairingStore(),
+            router: router,
+            macName: "Test Mac"
+        )
+        router.handle(.keyCode(key: .a, isDown: true, modifiers: []))
+        return (service, synthesizer)
+    }
+
+    private func assertTheKeyWasReleased(
+        _ synthesizer: RecordingSynthesizer,
+        _ message: String,
+        line: UInt = #line
+    ) {
+        let released = synthesizer.calls.contains(
+            .key(virtualCode: MacVirtualKeys.code(for: .a), isDown: false, modifiers: [])
+        )
+        XCTAssertTrue(released, message, line: line)
+    }
+
+    /// The reconnection case, and the common one, exactly as for the button.
+    func testASupersededConnectionStillReleasesAHeldKey() {
+        let (service, synthesizer) = serviceHoldingAKey()
+        service.endSession(isCurrentConnection: false, reason: .transportFailed("Wi-Fi went away"))
+        assertTheKeyWasReleased(
+            synthesizer,
+            "a superseded connection must still release the key it left held"
+        )
+    }
+
+    /// The other branch, so the fix cannot be "moved into the else".
+    func testTheCurrentConnectionEndingAlsoReleasesAHeldKey() {
+        let (service, synthesizer) = serviceHoldingAKey()
+        service.endSession(isCurrentConnection: true, reason: .peerClosed)
+        assertTheKeyWasReleased(
+            synthesizer,
+            "the current connection ending must release the key it left held"
+        )
+    }
+
+    func testASilentPeerReleasesAHeldKey() {
+        let (service, synthesizer) = serviceHoldingAKey()
+        service.peerWentSilent()
+        assertTheKeyWasReleased(
+            synthesizer,
+            "a peer that stopped answering must not leave a key held"
+        )
+    }
+
+    // MARK: - Input is gated behind a completed handshake
+    //
+    // Nothing used to check that the peer had sent `hello` before its pointer
+    // and key messages were acted on. That combines badly with pairing: a
+    // device can connect on a pairing candidate's key, never say `hello`, and
+    // so never trigger promotion, let the window expire, and keep driving the
+    // Mac from a session that was never recorded as a pairing anywhere.
+
+    private func serviceWatchingInput() -> (PadlinkService, RecordingSynthesizer) {
+        let synthesizer = RecordingSynthesizer()
+        let service = PadlinkService(
+            store: InMemoryPairingStore(),
+            router: MessageRouter(
+                synthesizer: synthesizer,
+                geometry: ScreenGeometry(topLeftFrames: [CGRect(x: 0, y: 0, width: 1440, height: 900)])
+            ),
+            macName: "Test Mac"
+        )
+        return (service, synthesizer)
+    }
+
+    func testAButtonPressBeforeHelloIsNotSynthesized() {
+        let (service, synthesizer) = serviceWatchingInput()
+
+        let disposition = service.deliverInput(
+            .pointerButton(button: .left, isDown: true),
+            helloReceived: false
+        )
+
+        XCTAssertEqual(disposition, .rejectedBeforeHandshake)
+        XCTAssertTrue(
+            synthesizer.calls.isEmpty,
+            "a peer that never said hello must not be able to press a mouse button"
+        )
+    }
+
+    func testAPointerMoveBeforeHelloIsNotSynthesized() {
+        let (service, synthesizer) = serviceWatchingInput()
+
+        let disposition = service.deliverInput(
+            .pointerMove(dx: 200, dy: 0, dtMicros: 16_666),
+            helloReceived: false
+        )
+
+        XCTAssertEqual(disposition, .rejectedBeforeHandshake)
+        XCTAssertTrue(synthesizer.calls.isEmpty, "a peer that never said hello must not move the cursor")
+    }
+
+    func testTypingBeforeHelloIsNotSynthesized() {
+        let (service, synthesizer) = serviceWatchingInput()
+
+        let disposition = service.deliverInput(.keyText("sudo rm"), helloReceived: false)
+
+        XCTAssertEqual(disposition, .rejectedBeforeHandshake)
+        XCTAssertTrue(synthesizer.calls.isEmpty, "a peer that never said hello must not type")
+    }
+
+    /// The other branch, so the gate cannot be implemented as "reject
+    /// everything". Without this the app would pass its tests and do nothing.
+    func testInputAfterHelloIsSynthesized() {
+        let (service, synthesizer) = serviceWatchingInput()
+
+        let disposition = service.deliverInput(
+            .pointerButton(button: .left, isDown: true),
+            helloReceived: true
+        )
+
+        XCTAssertEqual(disposition, .routed)
+        XCTAssertTrue(
+            synthesizer.calls.contains { call in
+                if case .button(.left, isDown: true, _, _) = call { return true }
+                return false
+            },
+            "a peer that completed the handshake must still be able to press a button"
+        )
+    }
+
+    /// A rejected pre-handshake message must not leave anything behind in the
+    /// held state either. If it did, the teardown that follows would post a
+    /// release for a button the Mac never pressed.
+    func testInputRejectedBeforeHelloLeavesNothingHeld() {
+        let (service, synthesizer) = serviceWatchingInput()
+
+        _ = service.deliverInput(.pointerButton(button: .left, isDown: true), helloReceived: false)
+        service.endSession(isCurrentConnection: true, reason: .cancelled)
+
+        XCTAssertTrue(synthesizer.calls.isEmpty)
+    }
+
+    /// Tearing down a pre-handshake peer must not disturb an open pairing
+    /// window. A peer that could close the window by misbehaving would turn
+    /// this gate into a way to stop the user pairing at all.
+    ///
+    /// This holds today, because `endSession` only rewrites `state` when it is
+    /// `.connected` and a peer that never said hello never got there. It is
+    /// pinned here because the new teardown path depends on it.
+    func testTearingDownAPreHandshakePeerLeavesThePairingWindowOpen() throws {
+        let service = makeService()
+        let payload = try service.beginPairing()
+
+        service.endSession(isCurrentConnection: true, reason: .cancelled)
+
+        guard case .pairing = service.state else {
+            return XCTFail("expected the pairing window to stay open, got \(service.state)")
+        }
+        XCTAssertEqual(service.acceptedKeysForTesting.map(\.identity), [payload.pairingID.bytes])
+    }
+
     // MARK: - Telling the iPad the Accessibility answer changed
 
     /// `helloAck` reports Accessibility once. With no connection there is

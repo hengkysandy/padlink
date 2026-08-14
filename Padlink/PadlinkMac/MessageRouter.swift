@@ -54,6 +54,10 @@ final class MessageRouter {
             synthesizer.insertText(text)
 
         case let .keyCode(key, isDown, modifiers):
+            // Recorded for the same reason a button is. The down and the up
+            // are two separate frames, so a connection that dies between them
+            // leaves this key down at the HID level with nothing to let it go.
+            held.recordKey(key, isDown: isDown)
             synthesizer.postKey(
                 virtualCode: MacVirtualKeys.code(for: key),
                 isDown: isDown,
@@ -69,14 +73,27 @@ final class MessageRouter {
         }
     }
 
-    /// Releases every held button and modifier. Runs when the connection ends
-    /// and when the app quits, so a drop mid-drag cannot leave a stuck key.
+    /// Releases every held button, key, and modifier. Runs when the connection
+    /// ends and when the app quits, so a drop mid-drag or mid-keystroke cannot
+    /// leave anything stuck down.
+    ///
+    /// A key release carries no modifier flags. It is posted only as part of
+    /// this cleanup, and every modifier is released in the same drain a moment
+    /// later, so "nothing is held" is the truth being made true. Carrying the
+    /// flags from the original key down would mean storing per-key modifier
+    /// state for an event whose flags change nothing.
     func releaseEverything() {
         let point = synthesizer.currentCursorLocation
         for action in held.drainReleases() {
             switch action {
             case let .button(button):
                 synthesizer.setButton(button, isDown: false, at: point, clickCount: 1)
+            case let .key(key):
+                synthesizer.postKey(
+                    virtualCode: MacVirtualKeys.code(for: key),
+                    isDown: false,
+                    modifiers: []
+                )
             case let .modifier(modifier):
                 synthesizer.postModifierKey(modifier, isDown: false)
             }

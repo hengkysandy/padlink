@@ -102,6 +102,55 @@ final class MessageRouterTests: XCTestCase {
         XCTAssertTrue(releases.contains(.modifierKey(.command, isDown: false)))
     }
 
+    // MARK: - Releasing a held key code
+    //
+    // A key down and its matching key up are two separate frames. A connection
+    // dying between them leaves that key down at the HID level, and the Mac
+    // repeats the character into whatever has focus. Quitting Padlink does not
+    // stop it, because by then the key press does not belong to Padlink.
+
+    func testReleaseEverythingReleasesAHeldKey() {
+        router.handle(.keyCode(key: .a, isDown: true, modifiers: []))
+        let countBefore = synthesizer.calls.count
+
+        router.releaseEverything()
+
+        XCTAssertEqual(
+            Array(synthesizer.calls.dropFirst(countBefore)),
+            [.key(virtualCode: MacVirtualKeys.code(for: .a), isDown: false, modifiers: [])],
+            "a key the peer left down must be released when the connection ends"
+        )
+    }
+
+    /// The other branch, so the fix cannot be "release every key every time".
+    func testAKeyThePeerAlreadyReleasedIsNotReleasedAgain() {
+        router.handle(.keyCode(key: .a, isDown: true, modifiers: []))
+        router.handle(.keyCode(key: .a, isDown: false, modifiers: []))
+        let countBefore = synthesizer.calls.count
+
+        router.releaseEverything()
+
+        XCTAssertEqual(synthesizer.calls.count, countBefore)
+    }
+
+    func testReleaseEverythingReleasesTheKeyBeforeItsModifier() {
+        // Command held with Tab down is what the app switcher produces.
+        // Releasing Command first leaves a bare Tab still held and repeating.
+        router.handle(.modifierState(modifiers: [.command]))
+        router.handle(.keyCode(key: .tab, isDown: true, modifiers: [.command]))
+        let countBefore = synthesizer.calls.count
+
+        router.releaseEverything()
+
+        XCTAssertEqual(
+            Array(synthesizer.calls.dropFirst(countBefore)),
+            [
+                .key(virtualCode: MacVirtualKeys.code(for: .tab), isDown: false, modifiers: []),
+                .modifierKey(.command, isDown: false)
+            ]
+        )
+    }
+
     func testReleaseEverythingTwiceDoesNothingTheSecondTime() {
         router.handle(.pointerButton(button: .left, isDown: true))
         router.releaseEverything()
