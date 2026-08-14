@@ -1,4 +1,5 @@
 // Padlink/PadlinkMac/Views/MenuContentView.swift
+import PadlinkCore
 import SwiftUI
 
 struct MenuContentView: View {
@@ -30,6 +31,20 @@ struct MenuContentView: View {
 
         Divider()
         Button("Pair a device", action: onPair)
+
+        // Revoking access. The design has always had a long-lived shared key
+        // per device and, until now, no way to take one back: a paired iPad
+        // that was lost or given away kept working forever. A key you cannot
+        // revoke is the part of a pairing design that ages worst.
+        let paired = service.pairedDevices()
+        if paired.isEmpty == false {
+            Menu("Forget a device") {
+                ForEach(paired, id: \.id) { record in
+                    Button(record.peerName) { service.forget(record) }
+                }
+            }
+        }
+
         Divider()
         Button("Quit Padlink", action: onQuit)
     }

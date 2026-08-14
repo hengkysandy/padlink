@@ -210,6 +210,42 @@ final class PadlinkService: ObservableObject {
         }
     }
 
+    /// Every device that can currently connect, oldest pairing first.
+    ///
+    /// For the menu, so a user can see what has access before deciding what to
+    /// revoke. Returns an empty list rather than throwing: a keychain that
+    /// cannot be read is already reported through `state`, and a menu is not
+    /// the place to learn it a second time.
+    func pairedDevices() -> [PairingRecord] {
+        (try? store.loadAll()) ?? []
+    }
+
+    /// Revokes a pairing. That device can no longer connect.
+    ///
+    /// Two halves, and both are needed. Deleting the record stops the key being
+    /// loaded next time. Rebuilding the listener is what makes it true *now*:
+    /// pre-shared keys are fixed when `NWParameters` is created, so a listener
+    /// built before the deletion goes on accepting the revoked key until
+    /// something replaces it.
+    ///
+    /// A connection that device already has is also dropped. Revoking access
+    /// while leaving the current session running would be a revoke in name
+    /// only, and this is the one control in the app whose whole purpose is to
+    /// take control away from a device.
+    func forget(_ record: PairingRecord) {
+        try? store.delete(id: record.id)
+
+        if case let .connected(deviceName) = state, deviceName == record.peerName {
+            endSession(isCurrentConnection: true, reason: nil)
+            let dying = connection
+            connection = nil
+            Task { await dying?.cancel() }
+        }
+
+        try? reloadAcceptedKeys()
+        try? restartListener()
+    }
+
     /// Pre-shared keys are fixed when `NWParameters` is created, so any change
     /// to the accepted set means a new listener. This only stops the listener
     /// from accepting new inbound connections; any connection already

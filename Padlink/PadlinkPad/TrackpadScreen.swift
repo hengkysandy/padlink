@@ -51,6 +51,11 @@ struct TrackpadScreen: View {
 
     private var status: PadStatus { PadStatus(service.state) }
 
+    /// Read once per appearance, not per redraw. Opening and parsing the
+    /// provisioning profile on every frame of a drag would be absurd, and the
+    /// answer cannot change while the app is running.
+    @State private var expiryWarning: String?
+
     var body: some View {
         // One `GeometryReader` for the whole screen, only so the keyboard can
         // be given a height that matches the key size it will draw at. The
@@ -63,7 +68,10 @@ struct TrackpadScreen: View {
         // The first thing in this app that can make iOS ask about the local
         // network, and it happens here because this is the screen that comes
         // after the explanation.
-        .onAppear { model.startDiscoveryIfNeeded() }
+        .onAppear {
+            model.startDiscoveryIfNeeded()
+            expiryWarning = BuildExpiry.warning(expiry: BuildExpiry.expiryDate())
+        }
         .sheet(isPresented: $showingLayoutPicker) {
             LayoutPicker(selection: $layoutID)
         }
@@ -133,6 +141,19 @@ struct TrackpadScreen: View {
                 onPairAgain: { model.pairAgain() },
                 latencyMillis: service.latencyMillis
             )
+
+            if let expiryWarning {
+                // One line, above everything. The failure it prevents is iOS
+                // refusing to open the app with a message about an untrusted
+                // developer, which looks like a fault rather than a licence
+                // running out.
+                Label(expiryWarning, systemImage: "clock.badge.exclamationmark")
+                    .font(.footnote)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.yellow.opacity(0.25))
+            }
 
             if keyboardVisible {
                 KeyboardPanel(
@@ -331,41 +352,75 @@ private struct TextEntrySheet: View {
 private struct LayoutPicker: View {
     @Binding var selection: String
     @Environment(\.dismiss) private var dismiss
+    /// Read here as well as in the panel. `@AppStorage` on the same key is one
+    /// value in two places, not two values, so the toggle and the keyboard
+    /// cannot disagree.
+    @AppStorage("keyClickSound") private var keyClickSound = true
 
     var body: some View {
         NavigationStack {
-            List(KeyboardLayout.allCases) { layout in
-                Button {
-                    selection = layout.rawValue
-                    dismiss()
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(layout.title)
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                            Text(layout.summary)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+            List {
+                Section {
+                    ForEach(KeyboardLayout.allCases) { layout in
+                        Button {
+                            selection = layout.rawValue
+                            dismiss()
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(layout.title)
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    Text(layout.summary)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if layout.rawValue == selection {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            }
                         }
-                        Spacer()
-                        if layout.rawValue == selection {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(Color.accentColor)
-                        }
+                        .accessibilityAddTraits(layout.rawValue == selection ? [.isSelected] : [])
                     }
                 }
-                .accessibilityAddTraits(layout.rawValue == selection ? [.isSelected] : [])
+
+                Section {
+                    Toggle("Key click sound", isOn: $keyClickSound)
+                } footer: {
+                    // Says what it is instead of what it is not. The honest
+                    // version, that no iPad has the hardware for a haptic
+                    // click, belongs in the code and not in front of the user.
+                    Text("The same click the iPad's own keyboard makes. "
+                        + "It follows the silent switch.")
+                }
             }
             .navigationTitle("Keyboard")
             .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                // The one thing about this app that cannot be fixed in code,
+                // put where somebody hunting for gesture settings will find it.
+                // iPadOS keeps four and five finger swipes for itself and there
+                // is no way for an app to take them back, so without this the
+                // gesture simply does nothing and looks broken.
+                Text("Four-finger swipes are used by iPadOS itself. To use them "
+                    + "here, turn off Four and Five Finger Gestures in Settings, "
+                    + "General, Multitasking & Gestures. Three-finger swipes need "
+                    + "no changes.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .padding(16)
+                    .background(.bar)
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.large])
     }
 }
 

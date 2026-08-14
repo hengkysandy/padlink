@@ -619,6 +619,60 @@ final class PadlinkServiceTests: XCTestCase {
     func testAListenerWithNoKeysVouchesForNothing() {
         XCTAssertNil(PadlinkService.soleIdentity(of: []))
     }
+
+    // MARK: - Revoking a device
+
+    /// The design has always had a long-lived shared key per device and, until
+    /// now, no way to take one back. A paired iPad that was lost or given away
+    /// kept working forever.
+    func testForgettingADeviceRemovesItsPairing() throws {
+        let store = try storeHoldingOnePairing()
+        let service = makeService(store: store)
+        let record = try XCTUnwrap(service.pairedDevices().first)
+
+        service.forget(record)
+
+        XCTAssertTrue(service.pairedDevices().isEmpty)
+        XCTAssertNil(try store.load(id: record.id))
+    }
+
+    /// The half that is easy to leave out. Deleting the record only stops the
+    /// key being loaded next time; the running listener was built with the old
+    /// key set and goes on accepting the revoked key until something replaces
+    /// it. A revoke that takes effect on the next launch is not a revoke.
+    func testForgettingADeviceStopsItsKeyBeingAccepted() throws {
+        let store = try storeHoldingOnePairing()
+        let service = makeService(store: store)
+        let record = try XCTUnwrap(service.pairedDevices().first)
+
+        service.forget(record)
+
+        XCTAssertFalse(service.acceptedKeysForTesting.contains { $0.identity == record.id.bytes })
+    }
+
+    func testForgettingOneDeviceLeavesTheOthers() throws {
+        let store = try storeHoldingOnePairing()
+        let second = PairingRecord(
+            id: try XCTUnwrap(PairingID(bytes: Data(repeating: 9, count: PairingID.byteCount))),
+            secret: try XCTUnwrap(PairingSecret(bytes: Data(repeating: 8, count: 32))),
+            peerName: "Second iPad",
+            serviceName: nil,
+            pairedAt: Date()
+        )
+        try store.save(second)
+        let service = makeService(store: store)
+        let first = try XCTUnwrap(service.pairedDevices().first { $0.peerName == "Old iPad" })
+
+        service.forget(first)
+
+        XCTAssertEqual(service.pairedDevices().map(\.peerName), ["Second iPad"])
+    }
+
+    /// Nothing paired means nothing to show, and the menu hides the whole item.
+    func testAServiceWithNoPairingsListsNoDevices() {
+        XCTAssertTrue(makeService().pairedDevices().isEmpty)
+    }
+
 }
 
 /// A store whose Keychain can be made to refuse, which is what a locked

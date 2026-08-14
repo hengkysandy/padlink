@@ -1,4 +1,5 @@
 // Padlink/PadlinkPad/KeyboardPanel.swift
+import AudioToolbox
 import PadlinkCore
 import SwiftUI
 import UIKit
@@ -21,6 +22,17 @@ struct KeyboardPanel: View {
     let onLockedModifiersChanged: (KeyModifiers) -> Void
 
     @State private var engine = KeyboardEngine()
+
+    /// Whether a key makes a sound.
+    ///
+    /// Sound and not haptics, which is worth stating because haptics would be
+    /// the obvious answer on a phone. No iPad has a Taptic Engine, so
+    /// `UIImpactFeedbackGenerator` does nothing at all here. Sound is the only
+    /// feedback available beyond the key moving.
+    ///
+    /// Off is a real choice, so it is a setting rather than a decision made for
+    /// the user. A sound that cannot be turned off is worse than no sound.
+    @AppStorage("keyClickSound") private var keyClickSound = true
 
     var body: some View {
         GeometryReader { geometry in
@@ -111,6 +123,13 @@ struct KeyboardPanel: View {
     }
 
     private func press(_ cap: KeyCap) {
+        if keyClickSound {
+            // 1104 is the system keyboard click, the same one the iPad's own
+            // keyboard uses. Borrowed rather than shipped as an audio file so
+            // it matches whatever the user already expects a key to sound like,
+            // and it follows the ringer switch on its own.
+            AudioServicesPlaySystemSound(1104)
+        }
         for message in engine.press(cap.action) {
             send(message)
         }
