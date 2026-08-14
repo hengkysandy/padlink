@@ -657,3 +657,40 @@ project and had already cost time twice.
 Suites verified independently after the heartbeat commit: Core 114,
 PadlinkMac 66, PadlinkPadTests 231. Commits: 3278f92 (heartbeat + live
 accessibility + the Critical stuck-button fix), d0b8265 (`./padlink pad`).
+
+## 2026-08-14 12:11 — (auto session marker)
+
+## 2026-08-14 — Pairing lifecycle security pass (branch-review I2–I5)
+
+Commit `011a47a`. Full write-up: `.superpowers/sdd/pairing-security-report.md`.
+
+- **I2 (any connection promotes the candidate).** Measured first: Network.framework
+  cannot report the negotiated PSK identity. `sec_protocol_metadata_access_pre_shared_keys`
+  returns the keys configured *locally* (two-key loopback listener saw both after a
+  one-key handshake). The server-side PSK selection block does carry the offered
+  identity but is shared across connections, so correlating it is a race. Fix: a
+  pairing window's listener accepts only the candidate key, and each connection
+  carries the single identity its listener was built for down through `accept` and
+  `readLoop`. Cost: a paired iPad cannot make a *new* connection while a window is
+  open.
+- **I3.** `PadlinkService.completedPairings` (published counter, bumped only after
+  `store.save` succeeds) closes the QR window.
+- **I4.** Auto-copy on "Pair a device" removed. The button in `PairingView` is now
+  the only writer, via `PairingClipboard`, which marks `org.nspasteboard.ConcealedType`
+  and clears on close unless the user copied something else. The old comment's
+  "single-use" and "expires in 120 seconds" were both false.
+- **I5.** `cancelPairing` fails closed and loud instead of `try?`. New
+  `listeningIdentities` records what the running listener was *really* built for.
+- 12 mutations, all caught, restores SHA-256 verified.
+- Suites: Core 114, PadlinkPadTests 231, PadlinkMac 90 run / 88 pass.
+
+### TODO when resuming
+- `./padlink test` cannot build the Mac target: the new `PadlinkMac.entitlements`
+  needs a provisioning profile and the `test)` branch is the only one that does not
+  pass `"${SIGNING[@]}"`. Add it.
+- `KeychainPairingStoreTests.testLoadingAMalformedRecordThrowsMalformedStoredRecordNotADecodingError`
+  fails: its raw `SecItemAdd` was not given `kSecUseDataProtectionKeychain` when the
+  store was. Two failing assertions, one test.
+- A peer can drive input without ever sending `hello`. `readLoop`'s `default:` branch
+  has no handshake guard.
+- **Two agents were editing this worktree at once today.** Do not do that again.
