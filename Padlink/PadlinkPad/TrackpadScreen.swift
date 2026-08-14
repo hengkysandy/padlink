@@ -16,10 +16,59 @@ struct TrackpadScreen: View {
     @ObservedObject var service: PadService
 
     @State private var isTyping = false
+    @State private var showingLayoutPicker = false
+    /// Held modifiers travel from the keyboard down to the trackpad, so a pinch
+    /// can give Command back without also clearing a lock the user set.
+    @State private var lockedModifiers: KeyModifiers = []
+
+    /// Remembered across launches. Choosing a keyboard is a preference about
+    /// the hardware in front of the user, not about this session, and having to
+    /// set it again every launch is what makes a setting feel broken.
+    @AppStorage("keyboardLayout") private var layoutID = KeyboardLayout.macBook.rawValue
+
+    private var layout: KeyboardLayout {
+        KeyboardLayout(rawValue: layoutID) ?? .macBook
+    }
 
     private var status: PadStatus { PadStatus(service.state) }
 
     var body: some View {
+        // One `GeometryReader` for the whole screen, only so the keyboard can
+        // be given a height that matches the key size it will draw at. The
+        // panel derives its key size from its own width, so the height has to
+        // be computed from that same width or the bottom row is clipped on a
+        // narrow iPad and floats in empty space on a wide one.
+        GeometryReader { geometry in
+            content(width: geometry.size.width, height: geometry.size.height)
+        }
+        // The first thing in this app that can make iOS ask about the local
+        // network, and it happens here because this is the screen that comes
+        // after the explanation.
+        .onAppear { model.startDiscoveryIfNeeded() }
+        .sheet(isPresented: $showingLayoutPicker) {
+            LayoutPicker(selection: $layoutID)
+        }
+    }
+
+    /// How much room to give the keyboard, in points.
+    ///
+    /// Its natural height is whatever the width allows, but it is capped at
+    /// four tenths of the screen. Uncapped, the full MacBook layout on an 11
+    /// inch iPad in landscape takes about 470 points and leaves the trackpad a
+    /// 200 point strip, which is too short to drag across. The panel scales its
+    /// keys down to whatever it is given, so the cap costs key size rather than
+    /// cutting the bottom row off.
+    private func keyboardHeight(width: CGFloat, height: CGFloat) -> CGFloat {
+        let rows = layout.rows.count
+        guard rows > 0 else { return 0 }
+        // 16 for the panel's own horizontal padding, which is not available to
+        // the keys and so must not be counted when working out the key size.
+        let unit = max(0, width - 16) / layout.widthInUnits
+        let natural = unit * KeyboardPanel.heightInUnits(rows: rows)
+        return min(natural, height * 0.4)
+    }
+
+    private func content(width: CGFloat, height: CGFloat) -> some View {
         VStack(spacing: 0) {
             StatusHeader(
                 status: status,
@@ -31,7 +80,10 @@ struct TrackpadScreen: View {
                 onPairAgain: { model.pairAgain() }
             )
 
-            TrackpadView(send: { message in service.send(message) })
+            TrackpadView(
+                send: { message in service.send(message) },
+                lockedModifiers: lockedModifiers
+            )
                 .clipShape(RoundedRectangle(cornerRadius: 20))
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
@@ -56,6 +108,23 @@ struct TrackpadScreen: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityLabel("Trackpad. Drag to move your Mac's cursor.")
 
+            if layout != .trackpadOnly {
+                KeyboardPanel(
+                    layout: layout,
+                    send: { message in service.send(message) },
+                    onLockedModifiersChanged: { lockedModifiers = $0 }
+                )
+                .frame(height: keyboardHeight(width: width, height: height))
+                // Rebuilt whenever the connection comes or goes, which throws
+                // away the engine's held modifiers along with it. That is the
+                // correct answer rather than a shortcut: the Mac releases
+                // everything it was holding when a connection ends, so a
+                // keyboard that went on showing Command as locked would be
+                // showing something that stopped being true.
+                .id(service.state.isConnected)
+                .padding(.bottom, 6)
+            }
+
             typingBar
         }
         // No `.ignoresSafeArea(.keyboard)`. The default is what keeps the
@@ -67,18 +136,16 @@ struct TrackpadScreen: View {
         // `systemGroupedBackground` in light mode, so on a grouped background
         // the one thing the user is meant to touch is invisible.
         .background(Color(uiColor: .systemBackground))
-        .onAppear {
-            // The first thing in this app that can make iOS ask about the local
-            // network, and it happens here because this is the screen that
-            // comes after the explanation.
-            model.startDiscoveryIfNeeded()
-        }
     }
 
     private var typingBar: some View {
         HStack(spacing: 12) {
-            Image(systemName: "keyboard")
-                .foregroundStyle(.secondary)
+            Button {
+                showingLayoutPicker = true
+            } label: {
+                Image(systemName: "keyboard.badge.ellipsis")
+            }
+            .accessibilityLabel("Choose a keyboard layout. Currently \(layout.title).")
 
             TypingField(
                 isActive: $isTyping,
@@ -102,6 +169,53 @@ struct TrackpadScreen: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(Color(uiColor: .secondarySystemBackground))
+    }
+}
+
+/// Which on-screen keyboard to show.
+///
+/// A sheet with a row per layout rather than a segmented control in the typing
+/// bar. Three names alone do not say what the difference is, and the difference
+/// is the whole choice: one of them removes the keyboard entirely, which is a
+/// surprising thing to discover by tapping.
+private struct LayoutPicker: View {
+    @Binding var selection: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(KeyboardLayout.allCases) { layout in
+                Button {
+                    selection = layout.rawValue
+                    dismiss()
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(layout.title)
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            Text(layout.summary)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if layout.rawValue == selection {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                }
+                .accessibilityAddTraits(layout.rawValue == selection ? [.isSelected] : [])
+            }
+            .navigationTitle("Keyboard")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 

@@ -192,6 +192,11 @@ struct TrackpadView: UIViewRepresentable {
     /// Normally `padService.send`.
     var send: (ClientMessage) -> Void
 
+    /// What the on-screen keyboard currently has locked on the Mac. A pinch
+    /// holds Command with `modifierState`, which is absolute, so it has to know
+    /// what else was held before it can let go of Command alone.
+    var lockedModifiers: KeyModifiers = []
+
     func makeCoordinator() -> TrackpadCoordinator {
         TrackpadCoordinator(send: send)
     }
@@ -210,5 +215,6 @@ struct TrackpadView: UIViewRepresentable {
         // captured at `makeCoordinator` time goes stale. The coordinator, and
         // with it the interpreter's state, survives.
         context.coordinator.send = send
+        context.coordinator.lockedModifiers = lockedModifiers
     }
 }
