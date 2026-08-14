@@ -1,4 +1,4 @@
-# Padlink macOS app — design spec
+# Padlink macOS app: design spec
 
 **Date:** 2026-08-13
 **Status:** approved design, ready for an implementation plan

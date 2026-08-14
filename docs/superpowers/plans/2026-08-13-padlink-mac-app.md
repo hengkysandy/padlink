@@ -39,7 +39,7 @@
 
 ---
 
-### Task 0: Spike — Keychain access from an ad-hoc-signed app
+### Task 0: Spike: Keychain access from an ad-hoc-signed app
 
 **Throwaway.** Output is an answer in `NOTES.md`, not shipped code. `PadlinkCore` shipped no Keychain implementation because an unsigned `swift test` binary cannot use the data protection keychain. The app is a real bundle so it should work, but "should" is the word that preceded the TLS 1.3 mistake.
 
@@ -130,7 +130,7 @@ Report the verbatim output. If the data protection keychain fails and the legacy
 
 - [ ] **Step 4: Record the finding and delete the spike**
 
-Append to `NOTES.md` under `## 2026-08-13 — Spike: Keychain from an ad-hoc-signed app`: which keychain works, the exact status codes, whether a rebuild invalidates access, and the resulting decision for `KeychainPairingStore`.
+Append to `NOTES.md` under `## 2026-08-13, Spike: Keychain from an ad-hoc-signed app`: which keychain works, the exact status codes, whether a rebuild invalidates access, and the resulting decision for `KeychainPairingStore`.
 
 ```bash
 rm -rf Padlink/KeychainSpike
@@ -2896,7 +2896,7 @@ Check, in this order: is the Mac's Bonjour service visible (`dns-sd -B _padlink.
 
 - [ ] **Step 5: Write the results down**
 
-Append to `NOTES.md` under `## 2026-08-13 — Mac app complete`: both test counts, the manual checklist results including anything that failed, the Keychain spike's answer, and anything left for the iPad plan.
+Append to `NOTES.md` under `## 2026-08-13, Mac app complete`: both test counts, the manual checklist results including anything that failed, the Keychain spike's answer, and anything left for the iPad plan.
 
 Update `README.md`:
 

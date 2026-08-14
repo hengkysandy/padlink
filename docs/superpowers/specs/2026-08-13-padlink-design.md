@@ -1,4 +1,4 @@
-# Padlink — design spec
+# Padlink: design spec
 
 **Date:** 2026-08-13
 **Status:** approved design, ready for an implementation plan
@@ -560,7 +560,7 @@ Two implementation facts the spike surfaced, recorded so they are not rediscover
 
 The project `CLAUDE.md` currently says:
 
-> This directory is a self-contained named conversation ... It is NOT a code repo —
+> This directory is a self-contained named conversation ... It is NOT a code repo,
 > there's no app to ship.
 
 That stops being true. `CLAUDE.md` should be updated to describe a hybrid: `NOTES.md`

@@ -82,7 +82,7 @@ still and then lifting is a deliberate stop, and coasting anyway ignores it.
 
 ## The keyboard
 
-Three layouts, chosen from the keyboard icon in the bar at the bottom.
+Two layouts, chosen from the sliders button in the bar at the bottom.
 
 | Layout | What it is |
 |---|---|
@@ -123,7 +123,7 @@ tap. The question is how long.
 
 This is exactly how the iOS shift key already behaves, so there is nothing to
 learn. It also needs no timer, because "tap twice" just means "tap something that
-is already armed" — there is no timing window to miss.
+is already armed, so there is no timing window to miss.
 
 Plain latching (tap on, tap off) was rejected: a `⌘` tapped by accident would
 stay down forever, and a held Command makes the whole Mac behave strangely.
@@ -154,9 +154,9 @@ like every other lock.
 
 ## If a modifier ever does get stuck
 
-It should not, but the escape hatch is: tap the modifier until it is unhighlighted,
-or switch to "Trackpad only" and back, or just quit and reopen the iPad app. Any
-of the three releases everything on the Mac.
+It should not, but there are three escape hatches: tap the modifier until it is
+no longer highlighted, hide the keyboard and show it again, or quit and reopen
+the iPad app. Any of the three releases everything on the Mac.
 
 ## A keyboard attached to the iPad
 

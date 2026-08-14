@@ -21,14 +21,14 @@ Exact signatures the iPad calls, verified against source:
 
 - `PairingPayload.parse(_ text: String) throws -> PairingPayload`
 - `PairingPayload.pairingID`, `.secret`, `.macName`, `.serviceName`
-- `TLSPSK(identity: Data, key: Data)` — identity first
-- `PadlinkTransport.connectionParameters(psk: TLSPSK) -> NWParameters` — one psk, singular
+- `TLSPSK(identity: Data, key: Data)`: identity first
+- `PadlinkTransport.connectionParameters(psk: TLSPSK) -> NWParameters`: one psk, singular
 - `PadlinkConnection(connection: NWConnection)`, `.start()`, `.send(_:)`, `.cancel()`,
-  `.incoming`, `.closeReason` — an **actor**, so all of these need `await`
+  `.incoming`, `.closeReason`: an **actor**, so all of these need `await`
 - `ClientMessage.pointerMove(dx: Int16, dy: Int16, dtMicros: UInt16)`
 - `ClientMessage.pointerButton(button: PointerButton, isDown: Bool)`
 - `ClientMessage.scroll(dx: Int16, dy: Int16)`
-- `ClientMessage.keyText(_ text: String)` — **unlabelled**
+- `ClientMessage.keyText(_ text: String)`: **unlabelled**
 - `KeyRouter.messages(forCharacter: Character, modifiers: KeyModifiers) -> [ClientMessage]`
 - `Padlink.bonjourServiceType`, `Padlink.protocolVersion`
 
@@ -95,7 +95,7 @@ when `.padlink-team` exists.
 
 ---
 
-### Task 2: `MoveThrottle` — the clamp that prevents the crash
+### Task 2: `MoveThrottle`: the clamp that prevents the crash
 
 **Files:** `Padlink/PadlinkPad/MoveThrottle.swift`, plus tests
 
@@ -117,7 +117,7 @@ zero move, and an accumulation sequence that crosses the 1-point boundary.
 
 ---
 
-### Task 3: `MacBrowser` — find the Mac
+### Task 3: `MacBrowser`: find the Mac
 
 **Files:** `Padlink/PadlinkPad/MacBrowser.swift`, plus tests
 
@@ -134,7 +134,7 @@ which cannot be imported. Write one here.
 
 ---
 
-### Task 4: `PadPairingStore` — remember the Mac
+### Task 4: `PadPairingStore`: remember the Mac
 
 **Files:** `Padlink/PadlinkPad/PadPairingStore.swift`, plus tests
 
@@ -146,7 +146,7 @@ without being unlocked first.
 
 ---
 
-### Task 5: `PadService` — the connection lifecycle
+### Task 5: `PadService`: the connection lifecycle
 
 **Files:** `Padlink/PadlinkPad/PadService.swift`, plus tests
 
@@ -162,7 +162,7 @@ Mirrors the Mac's `PadlinkService`, but as the client.
 
 ---
 
-### Task 6: `TrackpadView` — the actual point of the app
+### Task 6: `TrackpadView`: the actual point of the app
 
 **Files:** `Padlink/PadlinkPad/TrackpadView.swift`
 
