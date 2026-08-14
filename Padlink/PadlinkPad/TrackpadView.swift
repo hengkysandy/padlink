@@ -149,6 +149,28 @@ final class TrackpadSurface: UIView {
         fatalError("init(coder:) is not used")
     }
 
+    /// Turns off the system's own three finger gestures for this view.
+    ///
+    /// iPadOS reserves three finger swipes for undo, redo, copy and paste. That
+    /// recognizer lives on the window, and when it recognizes it **cancels** the
+    /// touches this view was tracking. So a three finger swipe on the trackpad
+    /// arrived here as `touchesCancelled`, the interpreter correctly ended the
+    /// gesture without sending anything, and the feature looked like it had
+    /// never been built. Nothing in the gesture code was wrong, which is why it
+    /// passed every test.
+    ///
+    /// `.none` is the documented opt out, and it is safe here because this view
+    /// has nothing to undo: it is a bare surface that reports touches, with no
+    /// text and no editing of any kind.
+    ///
+    /// Four and five finger swipes are a different matter. Those belong to the
+    /// system (App Switcher, Home, switching apps) and cannot be taken back, so
+    /// a four finger gesture works only when the user has turned off "Four and
+    /// Five Finger Gestures" in Settings.
+    override var editingInteractionConfiguration: UIEditingInteractionConfiguration {
+        .none
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         report(.began, touches, event)
     }
