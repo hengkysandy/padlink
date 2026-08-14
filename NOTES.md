@@ -786,3 +786,5 @@ argument for hand testing even when coverage looks complete.
 - The trackpad shows the **live finger count** while more than one finger is
   down. Added because a multi-finger gesture that does nothing gives no clue
   whether the fingers were seen at all.
+
+## 2026-08-14 21:20 — (auto session marker)
