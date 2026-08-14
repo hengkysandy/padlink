@@ -157,3 +157,45 @@ like every other lock.
 It should not, but the escape hatch is: tap the modifier until it is unhighlighted,
 or switch to "Trackpad only" and back, or just quit and reopen the iPad app. Any
 of the three releases everything on the Mac.
+
+## A keyboard attached to the iPad
+
+Plug in or pair a Magic Keyboard (or any Bluetooth keyboard) and it drives the
+Mac directly. No on-screen keyboard, no text field, and the lowest latency the
+app can manage.
+
+**It sends the physical key, not the letter printed on it.** That is deliberate,
+and it is the difference between typing into an iPad and driving a Mac. A key
+code is interpreted through the *Mac's* keyboard layout, so a Mac set to French
+produces French whatever the iPad's keys say. Sending the character instead would
+force the iPad's layout onto the wrong machine.
+
+It also means **key repeat works**. iPadOS delivers one key-down event and no
+repeats, so the app cannot repeat a character. But the press and the release are
+sent as they happen, the key is genuinely held on the Mac, and the Mac's own
+repeat takes over.
+
+Modifiers are really held down, so `⌘` across three presses of `Tab` keeps the
+app switcher open. They are released automatically when you leave the app.
+
+## The latency figure
+
+While connected, the status bar shows the round trip to the Mac and back.
+
+| Colour | Meaning |
+|---|---|
+| Green, up to 40ms | The design estimate. Feels like a trackpad |
+| Orange, up to 90ms | Noticeable if you look for it |
+| Red, past 90ms | Feels wrong, and it is the network rather than the app |
+
+It exists because "this feels bad because the app is broken" and "this feels bad
+because the Wi-Fi is busy" look identical from the outside. One of them shows
+180ms. A 5GHz network, or moving closer to the router, is the usual fix.
+
+## Revoking a device
+
+On the Mac: menu bar icon, then **Forget a device**.
+
+That device can no longer connect, immediately, and any session it currently has
+is dropped. Worth doing for an iPad you sold, lent, or lost, because a pairing is
+a long-lived key and nothing else expires it.
