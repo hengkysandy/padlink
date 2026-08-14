@@ -94,12 +94,22 @@ struct TrackpadScreen: View {
 
     /// How much room to give the keyboard, in points.
     ///
-    /// Its natural height is whatever the width allows, but it is capped at
-    /// four tenths of the screen. Uncapped, the full MacBook layout on an 11
-    /// inch iPad in landscape takes about 470 points and leaves the trackpad a
-    /// 200 point strip, which is too short to drag across. The panel scales its
-    /// keys down to whatever it is given, so the cap costs key size rather than
-    /// cutting the bottom row off.
+    /// Its natural height is whatever the width allows: the biggest keys that
+    /// fit across the screen. The cap exists only to stop a very tall, narrow
+    /// screen giving the whole display to the keyboard.
+    ///
+    /// The cap used to be four tenths, which was the wrong trade. It threw away
+    /// about a third of the key size that would have fitted, on every screen, to
+    /// protect a trackpad the user can now uncover with one tap. Keys that are
+    /// hard to hit are a cost paid on every keystroke; a smaller trackpad is a
+    /// cost paid only while the keyboard is up, and only until you tap Hide.
+    ///
+    /// Note what the ceiling really is. A MacBook keyboard is about 285mm wide
+    /// and an 11 inch iPad is about 179mm, so a life-size copy cannot fit and no
+    /// setting here can make one. The most that fits is the screen width divided
+    /// by the layout's width in key units, which is what "natural" means below.
+    /// The Compact layout is the real answer for big keys: 10 units instead of
+    /// 14.5 makes each one about half again as wide.
     private func keyboardHeight(width: CGFloat, height: CGFloat) -> CGFloat {
         guard keyboardVisible else { return 0 }
         let rows = layout.rows.count
@@ -108,7 +118,7 @@ struct TrackpadScreen: View {
         // the keys and so must not be counted when working out the key size.
         let unit = max(0, width - 16) / layout.widthInUnits
         let natural = unit * KeyboardPanel.heightInUnits(rows: rows)
-        return min(natural, height * 0.4)
+        return min(natural, height * 0.62)
     }
 
     private func content(width: CGFloat, height: CGFloat) -> some View {
@@ -138,6 +148,11 @@ struct TrackpadScreen: View {
                 // showing something that stopped being true.
                 .id("\(layoutID)-\(service.state.isConnected)")
                 .padding(.top, 6)
+                // Slides up out of the way rather than vanishing. The trackpad
+                // grows into the space it leaves, and seeing that happen is
+                // what makes the connection between the two obvious the first
+                // time somebody taps Hide.
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             trackpad
@@ -220,7 +235,7 @@ struct TrackpadScreen: View {
     private var toolbar: some View {
         HStack(spacing: 24) {
             Button {
-                keyboardVisible.toggle()
+                withAnimation(.snappy(duration: 0.32)) { keyboardVisible.toggle() }
             } label: {
                 Label(
                     keyboardVisible ? "Hide keyboard" : "Show keyboard",
@@ -364,12 +379,12 @@ private struct StatusHeader: View {
     let onPairAgain: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: isCalm ? 4 : 10) {
             HStack(spacing: 10) {
                 Image(systemName: icon)
                     .font(isLoud ? .title2 : .body)
                 Text(status.headline)
-                    .font(isLoud ? .title3.weight(.bold) : .headline)
+                    .font(headlineFont)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Spacer(minLength: 8)
@@ -377,9 +392,11 @@ private struct StatusHeader: View {
                 if status.level == .error || status.level == .idle {
                     Button("Try again", action: onRetry)
                         .buttonStyle(.bordered)
+                        .controlSize(isCalm ? .small : .regular)
                 }
                 Button("Pair again", action: onPairAgain)
                     .buttonStyle(.bordered)
+                    .controlSize(isCalm ? .small : .regular)
             }
 
             if let detail = status.detail {
@@ -388,10 +405,25 @@ private struct StatusHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(16)
+        // Thin while everything is working, and only then. A connected banner
+        // has one short line to say and repeats it forever, so the tall version
+        // was spending about fifty points of screen on "yes, still fine" that
+        // the keyboard and the trackpad both wanted. Every state that needs
+        // reading keeps its full size.
+        .padding(.horizontal, 16)
+        .padding(.vertical, isCalm ? 7 : 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(background)
         .foregroundStyle(foreground)
+        .animation(.snappy(duration: 0.25), value: status.level)
+    }
+
+    /// True only when there is nothing to act on.
+    private var isCalm: Bool { status.level == .connected }
+
+    private var headlineFont: Font {
+        if isLoud { return .title3.weight(.bold) }
+        return isCalm ? .subheadline.weight(.medium) : .headline
     }
 
     /// True for the Accessibility case only.

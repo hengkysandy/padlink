@@ -88,9 +88,28 @@ Three layouts, chosen from the keyboard icon in the bar at the bottom.
 |---|---|
 | **MacBook** (default) | Every key, function row included, laid out like the machine in front of you |
 | **Compact** | Letters, modifiers and arrows only. Bigger keys, much more trackpad |
-| **Trackpad only** | No keyboard. The app as it was before |
 
-The choice is remembered across launches.
+The choice is remembered across launches. Hiding the keyboard is a separate
+button in the bottom bar, because which keyboard you use is something you set
+once and whether it is on screen is something you flip while working.
+
+### How big the keys can get
+
+Measured on an 11 inch iPad, where a real MacBook key is 17mm across:
+
+| | Landscape | Portrait |
+|---|---|---|
+| MacBook | 12.2mm | 8.5mm |
+| Compact | 16.8mm | 11.7mm |
+
+**A life-size MacBook keyboard cannot fit.** A MacBook keyboard is about 285mm
+wide and an 11 inch iPad is about 179mm. The most that fits is the screen width
+divided by the layout's width in key units, and no setting changes that.
+
+So if the keys feel small: **turn the iPad to landscape**, and **use Compact**,
+which is 10 key units wide instead of 14.5 and lands on almost exactly a real
+MacBook key. What Compact gives up (function row, digit row, symbols) is
+reachable through the text button in the bottom bar.
 
 ### Modifiers: tap once to arm, tap twice to lock
 

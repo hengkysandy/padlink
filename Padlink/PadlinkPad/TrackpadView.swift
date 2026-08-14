@@ -135,6 +135,32 @@ final class TrackpadCoordinator {
 final class TrackpadSurface: UIView {
     var onTouches: ((TouchEvent) -> Void)?
 
+    /// The line that follows the finger.
+    ///
+    /// A trackpad gives no feedback of its own: the finger is here and the
+    /// result is on another screen, so there is nothing to say the surface
+    /// noticed. The trail is that missing acknowledgement, and it costs nothing
+    /// to read because it is exactly where the user is already looking.
+    ///
+    /// Drawn in `CALayer` rather than SwiftUI on purpose. This has to repaint on
+    /// every touch event without going anywhere near the state that drives the
+    /// view hierarchy, because a SwiftUI redraw per touch would add work to the
+    /// one path in the app that must stay cheap.
+    private let trailLayer = CAShapeLayer()
+    /// A dot under each finger, so a two or three finger gesture shows every
+    /// finger it saw and not just the one leading the trail.
+    private let dotsLayer = CAShapeLayer()
+
+    /// Recent positions of the finger leading the gesture, oldest first.
+    private var trail: [CGPoint] = []
+    /// Which finger the trail is following. See `updateTrail` for why this is
+    /// held rather than picked afresh each time.
+    private var trailID: TouchID?
+
+    /// Long enough to read as a stroke, short enough to stay near the finger.
+    /// About a third of a second of movement at 60Hz.
+    private static let trailLength = 20
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         // Off by default on `UIView`, and without it the view only ever sees
@@ -142,6 +168,24 @@ final class TrackpadSurface: UIView {
         // nothing in the code to suggest why.
         isMultipleTouchEnabled = true
         backgroundColor = .secondarySystemBackground
+
+        trailLayer.fillColor = nil
+        trailLayer.lineCap = .round
+        trailLayer.lineJoin = .round
+        dotsLayer.strokeColor = nil
+        for layer in [trailLayer, dotsLayer] {
+            layer.frame = bounds
+            self.layer.addSublayer(layer)
+        }
+        applyTrailColors()
+
+        // A `CGColor` is a fixed colour, not a dynamic one, so it does not
+        // follow the system between light and dark on its own. Without this the
+        // trail keeps whatever shade it was born with and can end up invisible
+        // against the surface.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (surface: Self, _) in
+            surface.applyTrailColors()
+        }
     }
 
     @available(*, unavailable)
@@ -169,6 +213,92 @@ final class TrackpadSurface: UIView {
     /// Five Finger Gestures" in Settings.
     override var editingInteractionConfiguration: UIEditingInteractionConfiguration {
         .none
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        trailLayer.frame = bounds
+        dotsLayer.frame = bounds
+        trailLayer.lineWidth = 5
+    }
+
+    private func applyTrailColors() {
+        trailLayer.strokeColor = UIColor.label.withAlphaComponent(0.28).cgColor
+        dotsLayer.fillColor = UIColor.label.withAlphaComponent(0.22).cgColor
+    }
+
+    // MARK: - The trail
+
+    /// Redraws the trail and the finger dots for the touches now on the glass.
+    ///
+    /// `active` is empty when the last finger lifts, which is what fades the
+    /// trail out rather than cutting it off.
+    private func updateTrail(_ active: [TouchSample]) {
+        guard active.isEmpty == false else {
+            fadeOutTrail()
+            return
+        }
+
+        // Which finger the trail follows, held for as long as that finger is
+        // down. It cannot be "the first one": `active` is built from a `Set`, so
+        // its order is arbitrary and can differ between two events describing
+        // the same hand. The trail would then jump between fingers mid-gesture,
+        // drawing a line across the gap that nobody's finger travelled.
+        if trailID == nil || active.contains(where: { $0.id == trailID }) == false {
+            trailID = active.min(by: { $0.id.value < $1.id.value })?.id
+            trail.removeAll()
+        }
+        guard let leading = active.first(where: { $0.id == trailID }) else { return }
+
+        trail.append(leading.location)
+        if trail.count > Self.trailLength {
+            trail.removeFirst(trail.count - Self.trailLength)
+        }
+
+        let path = CGMutablePath()
+        path.addLines(between: trail)
+
+        let dots = CGMutablePath()
+        for sample in active {
+            dots.addEllipse(in: CGRect(
+                x: sample.location.x - 13,
+                y: sample.location.y - 13,
+                width: 26,
+                height: 26
+            ))
+        }
+
+        // Implicit animations off. A `CAShapeLayer` animates every path change
+        // over a quarter of a second by default, so the trail would smoothly
+        // catch up with the finger instead of following it, which reads as lag
+        // in the one place the app must not look laggy.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        trailLayer.removeAnimation(forKey: "fade")
+        dotsLayer.removeAnimation(forKey: "fade")
+        trailLayer.opacity = 1
+        dotsLayer.opacity = 1
+        trailLayer.path = path
+        dotsLayer.path = dots
+        CATransaction.commit()
+    }
+
+    private func fadeOutTrail() {
+        trail.removeAll()
+        trailID = nil
+        guard trailLayer.path != nil else { return }
+
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 1
+        fade.toValue = 0
+        fade.duration = 0.3
+        fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        // The animation only draws the fade; these make it stick, so a finger
+        // put back down after the fade does not flash the old trail.
+        trailLayer.opacity = 0
+        dotsLayer.opacity = 0
+        trailLayer.add(fade, forKey: "fade")
+        dotsLayer.add(fade, forKey: "fade")
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -213,6 +343,9 @@ final class TrackpadSurface: UIView {
         // difference becomes `dtMicros`, which drives the Mac's acceleration.
         let timestamp = event?.timestamp ?? touches.first?.timestamp ?? 0
 
+        // Drawing first, so the trail keeps up even if a send blocks. It is
+        // purely visual and touches none of the state the interpreter reads.
+        updateTrail(active)
         onTouches?(TouchEvent(phase: phase, active: active, timestamp: timestamp))
     }
 }

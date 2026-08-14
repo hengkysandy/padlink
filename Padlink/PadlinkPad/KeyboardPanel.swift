@@ -86,22 +86,27 @@ struct KeyboardPanel: View {
             VStack(spacing: 1) {
                 if let secondary = cap.secondaryLabel {
                     Text(secondary)
-                        .font(.system(size: max(9, unit * 0.26)))
+                        .font(.system(size: max(9, unit * 0.24)))
                         .foregroundStyle(.secondary)
                 }
                 Text(cap.label)
-                    .font(.system(size: max(11, unit * 0.36), weight: .medium))
+                    .font(.system(size: max(11, unit * 0.38), weight: .medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
             }
-            .frame(width: unit * cap.width, height: unit * 0.92)
-            .background(background(for: cap))
-            .foregroundStyle(foreground(for: cap))
-            .clipShape(RoundedRectangle(cornerRadius: max(4, unit * 0.14)))
         }
-        // Plain, not bordered. The default button style animates a highlight
-        // and adds its own padding, which fights the exact sizing above.
-        .buttonStyle(.plain)
+        // A style rather than a modified label, because only a style can see
+        // `isPressed`. The default button styles animate their own highlight and
+        // add their own padding, which fights the exact key sizing.
+        .buttonStyle(KeyCapStyle(
+            unit: unit,
+            width: cap.width,
+            background: background(for: cap),
+            foreground: foreground(for: cap)
+        ))
+        // Animates the latch colour, so a modifier arming or locking is a change
+        // the eye catches rather than a repaint it might miss.
+        .animation(.easeOut(duration: 0.15), value: latch(for: cap))
         .accessibilityLabel(accessibilityLabel(for: cap))
     }
 
@@ -143,5 +148,48 @@ struct KeyboardPanel: View {
         case .oneShot: return "\(cap.label), on for the next key"
         case .off: return cap.label
         }
+    }
+}
+
+/// One key: the shape, and what it does under a finger.
+///
+/// A real keycap moves when pressed and a flat rectangle does not, and on a
+/// glass keyboard that movement is the only confirmation there is. There is no
+/// travel to feel and the result appears on a different screen, so without it a
+/// key that was missed and a key that was hit look identical.
+///
+/// The press feedback is deliberately faster going down than coming back up.
+/// Touch down has to feel instant, and the release can afford to settle, which
+/// is what makes it read as a key rather than a fade.
+private struct KeyCapStyle: ButtonStyle {
+    let unit: CGFloat
+    let width: Double
+    let background: Color
+    let foreground: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
+        let radius = max(4, unit * 0.14)
+
+        return configuration.label
+            .frame(width: unit * width, height: unit * 0.92)
+            .background(pressed ? Color.accentColor : background)
+            .foregroundStyle(pressed ? Color.white : foreground)
+            .clipShape(RoundedRectangle(cornerRadius: radius))
+            // The seat the keycap sits in. Dropped while pressed, so the key
+            // looks like it went down into the board rather than just changing
+            // colour.
+            .shadow(
+                color: .black.opacity(pressed ? 0.05 : 0.18),
+                radius: pressed ? 1 : 2,
+                y: pressed ? 0 : 1
+            )
+            .scaleEffect(pressed ? 0.94 : 1)
+            .animation(
+                pressed
+                    ? .easeOut(duration: 0.06)
+                    : .spring(response: 0.28, dampingFraction: 0.55),
+                value: pressed
+            )
     }
 }
