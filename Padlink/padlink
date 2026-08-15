@@ -8,6 +8,7 @@
 #
 #   ./padlink team <ID>          set your Apple team id, once
 #   ./padlink up                 build and launch the Mac app
+#   ./padlink dmg [version]      build a shareable .dmg of the Mac app
 #   ./padlink pad                build and launch on the physical iPad
 #   ./padlink paste              pair using the code on the clipboard
 #   ./padlink pair "<url>"       pair with a code you have as text
@@ -25,7 +26,15 @@ IPAD_SIM="iPad Air 11-inch (M4)"
 # A configured Apple team id makes the signature stable across rebuilds, which
 # is what stops macOS dropping the Accessibility permission every time. The file
 # is gitignored: a team id is account-specific and this repository is public.
-SIGNING=()
+#
+# Without a team id the build has to give up the entitlements file as well.
+# `keychain-access-groups` is a restricted entitlement: Xcode refuses to build
+# an ad-hoc target that claims one ("requires a provisioning profile"), and if
+# you force it through, the kernel kills the process the moment it launches.
+# `KeychainPairingStore` notices at runtime and falls back to the legacy
+# keychain, so pairing still works, it is just stored somewhere else.
+SIGNING=(CODE_SIGN_ENTITLEMENTS="")
+TEAM=""
 if [ -f .padlink-team ]; then
   TEAM="$(tr -d '[:space:]' < .padlink-team)"
   if [ -n "$TEAM" ]; then
@@ -33,6 +42,26 @@ if [ -f .padlink-team ]; then
              CODE_SIGN_IDENTITY="Apple Development" -allowProvisioningUpdates)
   fi
 fi
+
+# What `dmg` signs with, regardless of whether a team id happens to be
+# configured on this machine. A released build must never carry the team's
+# signature: an "Apple Development" signed Mac app refuses to launch on any Mac
+# that is not in the provisioning profile, which defeats the point of sharing
+# it, and the profile embedded at Contents/embedded.provisionprofile would
+# publish the team id, the team name, the certificate and every registered
+# device UUID to a public repository.
+#
+# CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO is not tidiness. Left on, Xcode adds
+# `com.apple.security.get-task-allow` to an ad-hoc build even in Release, which
+# does two bad things at once. It lets any process on the machine attach a
+# debugger to Padlink and read the pairing secrets out of its memory. And it
+# makes macOS treat the binary as debuggable, so the legacy keychain refuses to
+# persist an item access grant, which turns into a login-password prompt on
+# every single launch that "Always Allow" cannot stop. The released build has no
+# entitlements at all.
+RELEASE_SIGNING=(CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual \
+                 DEVELOPMENT_TEAM="" PROVISIONING_PROFILE_SPECIFIER="" \
+                 CODE_SIGN_ENTITLEMENTS="" CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO)
 
 case "$1" in
   team)
@@ -51,7 +80,7 @@ case "$1" in
 
   up)
     echo "Building..."
-    [ ${#SIGNING[@]} -eq 0 ] && echo "(ad-hoc signing: expect to re-grant Accessibility after this build)"
+    [ -z "$TEAM" ] && echo "(ad-hoc signing: expect to re-grant Accessibility after this build)"
     xcodebuild -scheme PadlinkMac -configuration Debug \
       -derivedDataPath .build "${SIGNING[@]}" build -quiet 2>&1 \
       | grep -v "^--- xcodebuild: WARNING" || true
@@ -70,6 +99,124 @@ case "$1" in
     echo ""
     echo "Launched from $INSTALLED"
     echo "Look for the keyboard icon in your menu bar, top right."
+    ;;
+
+  dmg)
+    # Build a .dmg anyone can download and drag to /Applications.
+    #
+    # Ad-hoc signed on purpose. See RELEASE_SIGNING above for why a team
+    # signature is the wrong choice here, both for privacy and for portability.
+    # The cost is that macOS quarantines the download and every rebuild produces
+    # a new identity, so Accessibility has to be granted again after an update.
+    # Both are documented in the release notes.
+    VERSION="${2:-$(grep -m1 'MARKETING_VERSION:' project.yml | tr -dc '0-9.')}"
+    DIST="dist"
+    STAGE="$DIST/dmg-root"
+    REL_APP=".build-release/Build/Products/Release/PadlinkMac.app"
+    DMG="$DIST/PadlinkMac-$VERSION.dmg"
+
+    echo "Building Release, ad-hoc signed..."
+    xcodebuild -scheme PadlinkMac -configuration Release \
+      -derivedDataPath .build-release "${RELEASE_SIGNING[@]}" build -quiet 2>&1 \
+      | grep -v "^--- xcodebuild: WARNING" || true
+    [ -d "$REL_APP" ] || { echo "Build produced no app at $REL_APP"; exit 1; }
+
+    # The leak scan. This repository is public and a free Apple account's
+    # provisioning profile carries the team id, the account holder's real name,
+    # the signing certificate and every registered device UUID. Publishing a
+    # bundle that still holds any of that cannot be undone, so the scan aborts
+    # the build rather than warning about it.
+    echo ""
+    echo "Leak scan..."
+    LEAKED=0
+
+    if [ -e "$REL_APP/Contents/embedded.provisionprofile" ]; then
+      echo "  FAIL  embedded.provisionprofile is in the bundle"
+      LEAKED=1
+    else
+      echo "  ok    no embedded.provisionprofile"
+    fi
+
+    SIG="$(codesign -dvvv "$REL_APP" 2>&1)"
+    if echo "$SIG" | grep -q "Signature=adhoc"; then
+      echo "  ok    signature is ad-hoc"
+    else
+      echo "  FAIL  signature is not ad-hoc"
+      LEAKED=1
+    fi
+    if echo "$SIG" | grep -q "TeamIdentifier=not set"; then
+      echo "  ok    no team identifier"
+    else
+      echo "  FAIL  a team identifier is present"
+      LEAKED=1
+    fi
+
+    if [ -n "$(codesign -d --entitlements - "$REL_APP" 2>/dev/null | tr -d '[:space:]')" ]; then
+      echo "  FAIL  the bundle carries entitlements"
+      LEAKED=1
+    else
+      echo "  ok    no entitlements"
+    fi
+
+    # -I so grep treats every file as binary-safe and never skips one.
+    if [ -n "$TEAM" ]; then
+      if grep -rIal -- "$TEAM" "$REL_APP" > /dev/null 2>&1; then
+        echo "  FAIL  the team id appears inside the bundle"
+        LEAKED=1
+      else
+        echo "  ok    the team id does not appear in the bundle"
+      fi
+    fi
+
+    # A provisioning profile's device list is the main thing that looks like
+    # this, but a stray developer UUID from anywhere else is just as unwelcome.
+    if grep -rIaoE '[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}' "$REL_APP" \
+       | head -5 | grep -q .; then
+      echo "  FAIL  a UUID-shaped string is in the bundle:"
+      grep -rIaoE '[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}' "$REL_APP" \
+        | head -5 | sed 's/^/          /'
+      LEAKED=1
+    else
+      echo "  ok    no UUID-shaped strings"
+    fi
+
+    # The domain has to start with a letter, or every `icon_32x32@2x.png` name
+    # in the asset catalogue reads as an email address and the scan cries wolf
+    # on every single run. A scan nobody believes is worse than no scan.
+    EMAILS="$(grep -rIaoE '[A-Za-z0-9._%+-]+@[A-Za-z][A-Za-z0-9.-]*\.[A-Za-z]{2,}' "$REL_APP" \
+              | grep -viE '\.(png|jpg|jpeg|gif|pdf|car|nib|plist|json|strings|icns|tiff)$' || true)"
+    if [ -n "$EMAILS" ]; then
+      echo "  FAIL  an email-shaped string is in the bundle:"
+      echo "$EMAILS" | head -5 | sed 's/^/          /'
+      LEAKED=1
+    else
+      echo "  ok    no email-shaped strings"
+    fi
+
+    if [ "$LEAKED" -ne 0 ]; then
+      echo ""
+      echo "Refusing to package. Fix the findings above first."
+      exit 1
+    fi
+
+    echo ""
+    echo "Packaging $DMG..."
+    rm -rf "$STAGE" "$DMG"
+    mkdir -p "$STAGE"
+    cp -R "$REL_APP" "$STAGE/"
+    # The drag-to-install target. A symlink, so the .dmg stays small.
+    ln -s /Applications "$STAGE/Applications"
+
+    # UDZO is the compressed read-only format every macOS can mount with a
+    # double click. No background image and no window layout: that needs an
+    # AppleScript pass over a writable image, and a plain window that shows the
+    # app next to an /Applications alias already says what to do.
+    hdiutil create -volname "Padlink" -srcfolder "$STAGE" \
+      -ov -format UDZO "$DMG" -quiet
+    rm -rf "$STAGE"
+
+    echo ""
+    echo "Built $DMG ($(du -h "$DMG" | cut -f1))"
     ;;
 
   down)
@@ -104,7 +251,7 @@ case "$1" in
       echo "Plug it in and unlock it, then check: xcrun devicectl list devices"
       exit 1
     fi
-    if [ ${#SIGNING[@]} -eq 0 ]; then
+    if [ -z "$TEAM" ]; then
       echo "No team id set. A physical iPad will not run an ad-hoc signed build."
       echo "Run: ./padlink team <YOUR_TEAM_ID>"
       exit 1
@@ -167,7 +314,7 @@ case "$1" in
     ;;
 
   "")
-    echo "Usage: ./padlink up | down | test | pair \"<url>\" | move 200 0 | click left | ..."
+    echo "Usage: ./padlink up | dmg | down | test | pair \"<url>\" | move 200 0 | click left | ..."
     ;;
 
   *)

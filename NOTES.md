@@ -906,3 +906,80 @@ Suites: **Core 120, Mac 108, iPad 377.** Commit `1e5ff36`, pushed. iPad redeploy
   never posts a real Control key down. Some macOS symbolic hotkeys want the
   modifier genuinely held.
 - Drag to select, and momentum, both still unverified by hand.
+
+## 2026-08-15 — Ship the Mac app as a .dmg, ad-hoc signed
+
+Goal: a downloadable build the user can install on a second MacBook. The repo is
+public and the Apple account is free, so a team signature was not an option.
+
+**Why ad-hoc, not "Apple Development".** A team-signed build embeds
+`Contents/embedded.provisionprofile`, which holds the team id, the account
+holder's real name, the signing certificate and every registered device UUID.
+Publishing that on a public repo cannot be undone. Ad-hoc is also the only
+portable choice: an "Apple Development" signed Mac app refuses to launch on any
+Mac that is not in the profile, which is exactly the Mac we are shipping to.
+
+**Two blockers found and fixed.**
+
+1. **Ad-hoc cannot build at all with the entitlements file.** `xcodebuild` fails
+   with "requires a provisioning profile", because `keychain-access-groups` is a
+   restricted entitlement. Forcing it through does not help either: an ad-hoc
+   process that claims a restricted entitlement is killed by the kernel (measured,
+   exit 137). So the release build passes `CODE_SIGN_ENTITLEMENTS=""`. The
+   `padlink` script now does the same for any no-team build, which had been
+   quietly broken since the entitlements file was added.
+
+2. **`get-task-allow` was being injected into the Release build.** Xcode adds it
+   to an ad-hoc build even in Release unless
+   `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO` is set. Two problems at once: any
+   process could attach a debugger and read the pairing secrets out of memory,
+   and macOS treats a debuggable binary as unable to hold a persistent legacy
+   keychain grant, which is a login-password prompt on every launch. Caught by
+   the leak scan, not by reading the docs.
+
+**The keychain question, settled by measurement.** Ad-hoc drops
+`keychain-access-groups`, and the data protection keychain needs it. Probe
+results from an ad-hoc signed bundle:
+
+```
+dataProtection=true   add=-34018 (errSecMissingEntitlement)
+dataProtection=false  add=0  read=0  value round-tripped
+```
+
+Cross-process read of a legacy keychain item written by an earlier run of the
+same ad-hoc Release binary: `read = 0`, no password prompt.
+
+So `KeychainPairingStore` would have thrown on `save`, silently losing every
+pairing. There was no fallback in the code, so one was added: the store probes
+the data protection keychain once with a throwaway write and falls back to the
+legacy keychain when the write returns `errSecMissingEntitlement`. A write is
+the only operation that reveals the answer, because a read of the wrong keychain
+returns `errSecItemNotFound`, which is indistinguishable from "never paired".
+
+Verified: **110 PadlinkMac tests pass** under the exact release signing
+(`-configuration Release`, ad-hoc, no entitlements, no `get-task-allow`).
+
+**Packaging.** Added `./padlink dmg [version]` rather than a separate
+`package-dmg` script, because it reuses the signing block, the derived data
+convention and the app path that already live there. It builds Release ad-hoc,
+runs a leak scan that aborts on any finding, then stages the app plus an
+`/Applications` symlink and calls `hdiutil create -format UDZO`.
+
+Leak scan on the shipped artifact, all clean:
+no `embedded.provisionprofile`, `Signature=adhoc`, `TeamIdentifier=not set`, no
+entitlements, no UUID-shaped strings, no email-shaped strings, team id absent,
+`@fasset` absent. The only `hengky` hits are `com.hengkysandy.padlink*`, which is
+the bundle identifier and is already public in `project.yml`.
+
+**Gatekeeper, measured on macOS 26.5.2.**
+- Quarantined copy, opened through LaunchServices: blocked.
+- `xattr -dr com.apple.quarantine` applied **before** the first open attempt,
+  then opened: runs.
+- Removing the attribute **after** a blocked attempt did not help at the same
+  path. A fresh copy at a new path ran. So the note to users is: remove the
+  quarantine first, then open.
+
+**Known limitation confirmed earlier today.** A synthesized `CGEvent` cannot
+trigger system level hotkeys. `Cmd+A` and `Cmd+C` work, `Ctrl+Up` (Mission
+Control) and `Cmd+Shift+3` (screenshot) do nothing. So three-finger up/down and
+four-finger swipes do not work. This is a macOS restriction, not an app bug.

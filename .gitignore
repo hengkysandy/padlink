@@ -45,7 +45,10 @@ Padlink/PadlinkPad/Info.plist
 # Identifies one person's iPad, and this repository is public.
 .padlink-device
 
-# Device builds, and the journal stub a session hook writes when cwd is Padlink/.
+# Device builds, the Release build the .dmg is cut from, the packaged .dmg
+# itself, and the journal stub a session hook writes when cwd is Padlink/.
 # The real journal lives at the repository root.
 Padlink/.build-device/
+Padlink/.build-release/
+Padlink/dist/
 Padlink/NOTES.md
