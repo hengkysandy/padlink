@@ -7,6 +7,9 @@ public enum CodecError: Error, Equatable, Sendable {
     case unknownMessageType(UInt8)
     case unknownKey(UInt16)
     case unknownPointerButton(UInt8)
+    /// A newer iPad asked for something this Mac has never heard of. Rejected
+    /// rather than ignored, so it cannot look as though it worked.
+    case unknownSystemAction(UInt8)
     /// Bits 5 to 7 of the modifier bitfield must be zero.
     case reservedModifierBitsSet(UInt8)
     case invalidUTF8

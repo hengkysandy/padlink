@@ -73,6 +73,12 @@ final class MessageRouter {
         case let .modifierState(modifiers):
             handleModifierState(modifiers)
 
+        case let .systemAction(action):
+            // Nothing recorded in `held`, because this holds nothing. It is a
+            // single request that either happens or does not, with no matching
+            // release to leak.
+            synthesizer.perform(action)
+
         case .hello, .ping:
             // Owned by PadlinkService, not by input synthesis.
             break

@@ -872,12 +872,24 @@ final class TouchInterpreterTests: XCTestCase {
 
     // MARK: - Three and four finger swipes
 
-    func testThreeFingersUpOpensMissionControl() {
-        XCTAssertEqual(swipe(fingers: 3, dx: 0, dy: -60), stroke(.arrowUp, .control))
+    /// Mission Control is asked for by name, not spelled as Control and Up.
+    ///
+    /// The shortcut is correct and does not work. macOS ignores a synthesized
+    /// event for a hotkey the Dock or the WindowServer owns, which was measured
+    /// on real hardware: Command+A and Command+C posted the same way work
+    /// perfectly, Control+Up and Command+Shift+3 do nothing at all.
+    func testThreeFingersUpAsksTheMacToOpenMissionControl() {
+        XCTAssertEqual(swipe(fingers: 3, dx: 0, dy: -60), [.systemAction(.missionControl)])
     }
 
-    func testThreeFingersDownOpensAppExpose() {
-        XCTAssertEqual(swipe(fingers: 3, dx: 0, dy: 60), stroke(.arrowDown, .control))
+    /// App Exposé is blocked the same way and, unlike Mission Control, has no
+    /// app to open instead. So nothing is sent.
+    ///
+    /// Sending the keystroke anyway would be sending something already known
+    /// not to work, which is worse than sending nothing: it looks like the
+    /// feature exists and it costs a round trip to do nothing.
+    func testThreeFingersDownSendsNothingBecauseMacOSBlocksIt() {
+        XCTAssertEqual(swipe(fingers: 3, dx: 0, dy: 60), [])
     }
 
     /// Swiping right pulls the previous page back in from the left, matching
@@ -890,21 +902,18 @@ final class TouchInterpreterTests: XCTestCase {
         XCTAssertEqual(swipe(fingers: 3, dx: -60, dy: 0), stroke(.rightBracket, .command))
     }
 
-    /// Four fingers sideways switches spaces rather than pages. Keeping the
-    /// counts apart is what lets both exist: overloading one would mean
-    /// guessing whether a sideways swipe meant "go back" or "next desktop".
-    func testFourFingersLeftMovesToTheNextSpace() {
-        XCTAssertEqual(swipe(fingers: 4, dx: -60, dy: 0), stroke(.arrowRight, .control))
-    }
-
-    func testFourFingersRightMovesToThePreviousSpace() {
-        XCTAssertEqual(swipe(fingers: 4, dx: 60, dy: 0), stroke(.arrowLeft, .control))
+    /// Switching spaces is Control and an arrow, blocked like every other
+    /// system shortcut, and with no app to open instead. Dead, and honest
+    /// about it.
+    func testFourFingersSidewaysSendsNothingBecauseMacOSBlocksIt() {
+        XCTAssertEqual(swipe(fingers: 4, dx: -60, dy: 0), [])
+        XCTAssertEqual(swipe(fingers: 4, dx: 60, dy: 0), [])
     }
 
     /// Vertical is Mission Control for both counts, which is what macOS does
     /// and what everyone's muscle memory expects.
     func testFourFingersUpAlsoOpensMissionControl() {
-        XCTAssertEqual(swipe(fingers: 4, dx: 0, dy: -60), stroke(.arrowUp, .control))
+        XCTAssertEqual(swipe(fingers: 4, dx: 0, dy: -60), [.systemAction(.missionControl)])
     }
 
     /// A swipe fires a keystroke that changes the whole screen, and the iPad
@@ -915,14 +924,14 @@ final class TouchInterpreterTests: XCTestCase {
         XCTAssertEqual(interpreter.handle(event(.moved, row(3, dy: -30), at: 100.05)), [])
     }
 
-    /// One swipe, one keystroke. Without this a long three finger swipe would
-    /// fire on every frame past the threshold and switch four spaces.
+    /// One swipe, one action. Without this a long three finger swipe would fire
+    /// on every frame past the threshold and open Mission Control repeatedly.
     func testALongSwipeFiresExactlyOnce() {
         let interpreter = TouchInterpreter()
         _ = interpreter.handle(event(.began, row(3), at: 100))
         XCTAssertEqual(
             interpreter.handle(event(.moved, row(3, dy: -60), at: 100.05)),
-            stroke(.arrowUp, .control)
+            [.systemAction(.missionControl)]
         )
         XCTAssertEqual(interpreter.handle(event(.moved, row(3, dy: -200), at: 100.1)), [])
         XCTAssertEqual(interpreter.handle(event(.moved, row(3, dy: -400), at: 100.15)), [])
@@ -954,15 +963,31 @@ final class TouchInterpreterTests: XCTestCase {
         )
     }
 
-    /// Five fingers is a hand resting while three swipe, which is common. It is
-    /// treated as four rather than ignored: doing nothing at all reads as the
-    /// gesture being broken.
+    /// Five fingers is a hand resting while three swipe, which is common, and it
+    /// is treated as four.
+    ///
+    /// Sideways is the case that can tell four from three, because three
+    /// sideways is a page back and four sideways is nothing at all now that
+    /// macOS blocks switching spaces. So a five finger sideways swipe must send
+    /// nothing, and specifically must not page back.
     func testFiveFingersBehaveAsFour() {
         let interpreter = TouchInterpreter()
         _ = interpreter.handle(event(.began, row(5), at: 100))
         XCTAssertEqual(
             interpreter.handle(event(.moved, row(5, dx: -60), at: 100.05)),
-            stroke(.arrowRight, .control)
+            [],
+            "five fingers were read as three and navigated the page"
+        )
+    }
+
+    /// And the vertical case still reaches Mission Control with five down, so
+    /// "treated as four" does not quietly mean "ignored".
+    func testFiveFingersUpStillOpensMissionControl() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, row(5), at: 100))
+        XCTAssertEqual(
+            interpreter.handle(event(.moved, row(5, dy: -60), at: 100.05)),
+            [.systemAction(.missionControl)]
         )
     }
 

@@ -13,13 +13,13 @@ What the iPad surface does, and why each gesture is built the way it is.
 | Two fingers, drag | Scroll, both axes |
 | Two fingers, flick and lift | Scroll, then keep coasting and slow down |
 | **Two fingers, pinch** | **Zoom in and out** |
-| **Three fingers, up** | **Mission Control** |
-| **Three fingers, down** | **App Exposé** |
-| **Three fingers, right / left** | **Page back / forward** (Safari, Finder, Preview) |
-| **Four fingers, left / right** | **Next / previous desktop** |
-| **Four fingers, up** | **Mission Control** |
+| **Three or four fingers, up** | **Mission Control** |
+| **Three fingers, right / left** | **Page back / forward** (Safari, Finder) |
 
 Bold rows are new as of 2026-08-14.
+
+**Three fingers down, and four fingers sideways, do nothing. That is macOS, not
+a bug here.** See the section below.
 
 **Four-finger gestures only work if you turn off the system ones.** iPadOS keeps
 four and five finger swipes for itself (App Switcher, Home, switching apps) and
@@ -39,24 +39,56 @@ So every gesture above is sent as something the Mac already answers to:
 - **A swipe** is a keyboard shortcut. Mission Control is Control-Up, spaces are
   Control-Left and Control-Right, page navigation is Command-[ and Command-].
 
-That is why the protocol did not need a new message for any of this. It is also
-why a swipe is instant rather than animated with your fingers: the Mac receives
-a keystroke, not a partial gesture.
+A swipe is therefore instant rather than animated with your fingers: the Mac
+receives a keystroke, not a partial gesture.
 
-## Why three fingers and four fingers do different things
+## The second constraint, found the hard way
 
-macOS itself ships both mappings, in **System Settings > Trackpad > More
-Gestures**:
+**macOS ignores a synthesized event for a shortcut the system itself owns.**
 
-- "Swipe between pages" can be set to three fingers.
-- "Swipe between full-screen applications" can be set to four fingers.
+This was measured on real hardware on 2026-08-15, after three finger swipes were
+reported as doing nothing:
 
-Padlink uses both at once, one per finger count. The alternative was to put both
-on one count and guess which the user meant, in whatever app they happened to be
-looking at. "Go back" and "next desktop" are not recoverable from each other.
+| Posted with `CGEvent` | Result |
+|---|---|
+| Command and A, then Command and C, into TextEdit | **works**, the clipboard got the text |
+| Command and Shift and 3 (screenshot) | **no file created** |
+| Control and Up (Mission Control) | **does not open** |
+| A plain mouse move | works |
+| A scroll carrying the Command flag | delivered with the flag intact |
 
-Five fingers is treated as four. A hand resting while three fingers swipe is
-common, and ignoring it entirely reads as the gesture being broken.
+So ordinary application shortcuts arrive perfectly, and anything the
+WindowServer or the Dock owns is thrown away. This is a security boundary in
+macOS, not a fault in Padlink, and no amount of work on the keystroke path can
+get around it.
+
+What that costs, and what was done about it:
+
+- **Mission Control** was Control and Up. It is now a `systemAction` message,
+  and the Mac opens `/System/Applications/Mission Control.app` instead. A
+  different route to the same place, and a supported one. This works.
+- **App Exposé** was Control and Down. Blocked, and there is no app to open. The
+  gesture now sends **nothing**. Sending a keystroke already known not to work
+  would cost a round trip to do nothing and still look like a feature.
+- **Switching spaces** was four fingers sideways, Control and an arrow. Blocked,
+  with no public API of any kind. Also sends nothing.
+
+That is why the finger counts no longer do different things vertically. Up is
+Mission Control for both three fingers and four, and down is not used.
+
+Five fingers is still treated as four. A hand resting while three fingers swipe
+is common, and ignoring it entirely reads as the gesture being broken.
+
+## What zoom actually needs
+
+The Command flag does reach the Mac on a scroll event, which was confirmed with
+an event tap reading back what macOS delivered. So a pinch is being sent
+correctly.
+
+It will zoom in **Safari, Chrome and Finder**, which all read Command and scroll.
+It will **not** zoom in Preview, which wants a real `NSEvent.magnify`, and macOS
+has no public API to synthesize one. If a pinch seems to do nothing, try it in
+Safari before assuming it is broken.
 
 ## Why scroll and zoom have a small dead zone
 
