@@ -50,5 +50,6 @@ Padlink/PadlinkPad/Info.plist
 # The real journal lives at the repository root.
 Padlink/.build-device/
 Padlink/.build-release/
+Padlink/.build-testrel/
 Padlink/dist/
 Padlink/NOTES.md

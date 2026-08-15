@@ -1039,3 +1039,21 @@ launches Mission Control.app instead of posting a keystroke macOS ignores. Three
 fingers down (App Exposé) and the four-finger swipes still do nothing, because
 neither has a route that does not go through a system level hotkey. That is a
 macOS restriction, not an app bug, and the release notes say so.
+
+### Published
+
+`gh release create v0.1.0-alpha --repo hengkysandy/padlink --prerelease`, tagged
+at the merge commit on `worktree-agent-a76e1428a481392ef`.
+
+- https://github.com/hengkysandy/padlink/releases/tag/v0.1.0-alpha
+- `PadlinkMac-0.1.0-alpha.dmg`, 1,379,229 bytes (1.3M)
+- `sha256 a8f6c111cad02744ee01438797d95f8295b675f3dc0fe636b6e40d8fea6a4f52`
+- Downloaded it back with `gh release download`: checksum matches the local file.
+- End to end from the downloaded copy: mounted, copied out, quarantined,
+  `xattr -dr`, opened. Runs. `Signature=adhoc`, `TeamIdentifier=not set`.
+
+`main` was **not** updated. The branch is pushed and the tag points at it, so
+merging is still the user's call.
+
+Suites at the tagged commit: Core 123, PadlinkMac 112, both passing under the
+exact release signing.
