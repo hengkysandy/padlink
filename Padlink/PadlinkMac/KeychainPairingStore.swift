@@ -18,11 +18,77 @@ enum KeychainError: Error, Equatable {
 /// `PairingRecord` itself `Codable`. A public `Codable` conformance on a type
 /// holding a 256-bit pre-shared key invites it being serialised somewhere it
 /// should not be.
-final class KeychainPairingStore: PairingStore {
+final class KeychainPairingStore: PairingStore, @unchecked Sendable {
     private let service: String
+
+    // Guards `dataProtectionDecision` only. `PairingStore` is `Sendable`, and a
+    // final class stops being implicitly Sendable the moment it holds a `var`.
+    private let lock = NSLock()
+    private var dataProtectionDecision: Bool?
 
     init(service: String = Padlink.keychainService) {
         self.service = service
+    }
+
+    /// Whether this build is allowed to use the data protection keychain.
+    ///
+    /// Measured once, not declared. The keychain that is available depends on
+    /// how the app was signed, and the same source now ships two ways: a local
+    /// build signed with the user's Apple team, and the ad-hoc signed build in
+    /// the released .dmg. Only the first carries the
+    /// `keychain-access-groups` entitlement, so only the first can write to the
+    /// data protection keychain. The second gets -34018
+    /// (`errSecMissingEntitlement`) on every write.
+    ///
+    /// An ad-hoc build cannot simply keep the entitlement and lose the team:
+    /// `keychain-access-groups` is a restricted entitlement, and the kernel
+    /// kills an ad-hoc signed process that claims one. So the released build has
+    /// no entitlements at all, and falls back to the legacy file keychain.
+    ///
+    /// The legacy keychain's known problem (a login-password prompt on every
+    /// launch that "Always Allow" cannot stop) comes from `get-task-allow`,
+    /// which only a Debug build carries. The released build is Release and
+    /// ad-hoc, so its item access list holds a stable snapshot and reads
+    /// succeed across launches with no prompt. Measured on macOS on
+    /// 2026-08-15, not assumed.
+    /// Internal rather than private so the tests can write raw items into
+    /// whichever keychain the store itself chose. Writing to the other one
+    /// leaves items where nothing ever cleans them up.
+    var usesDataProtectionKeychain: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if let decided = dataProtectionDecision { return decided }
+        let decided = Self.dataProtectionKeychainAcceptsWrites(service: service)
+        dataProtectionDecision = decided
+        return decided
+    }
+
+    /// Tries a throwaway write, rather than reading the signature or the
+    /// entitlement and guessing what the keychain will make of it.
+    ///
+    /// A write is the only operation that reveals the answer. Reading the wrong
+    /// keychain returns `errSecItemNotFound`, which is indistinguishable from an
+    /// app that has simply never paired, so a read-based probe would silently
+    /// pick the wrong backend and make an existing pairing look lost.
+    private static func dataProtectionKeychainAcceptsWrites(service: String) -> Bool {
+        // Deliberately not a `PairingID`-shaped account, so `loadAll` skips it
+        // even if a crash between the add and the delete leaves it behind.
+        let probe: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: "data-protection-probe",
+            kSecUseDataProtectionKeychain as String: true
+        ]
+        SecItemDelete(probe as CFDictionary)
+
+        var add = probe
+        add[kSecValueData as String] = Data()
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let status = SecItemAdd(add as CFDictionary, nil)
+        guard status == errSecSuccess else { return false }
+
+        SecItemDelete(probe as CFDictionary)
+        return true
     }
 
     private struct StoredRecord: Codable {
@@ -33,26 +99,23 @@ final class KeychainPairingStore: PairingStore {
     }
 
     private func baseQuery(account: String?) -> [String: Any] {
-        // The data protection keychain, matching iOS.
+        // The data protection keychain, matching iOS, whenever this build is
+        // signed well enough to be allowed it.
         //
-        // The Task 0 spike rejected this because it returned -34018
-        // (errSecMissingEntitlement) from the ad-hoc signed bundle the project
-        // had then. That blocker is gone: the app now signs with a real team
-        // and carries a keychain-access-group entitlement.
+        // A team-signed build gets it. Items there key on the signed identity,
+        // so they survive rebuilds and never prompt for the login password.
         //
-        // The claim that replaced it, that the legacy keychain "survives
-        // rebuilds", turned out to be false in practice. Legacy items are
-        // guarded by a per-item access list holding a snapshot of the trusted
-        // binary, and a Debug build carries `get-task-allow`, so macOS treats
-        // it as debuggable and refuses to persist the grant at all. That is a
-        // login-password prompt on every launch which "Always Allow" cannot
-        // stop. This keychain keys on the signed identity instead, so it
-        // survives rebuilds and never prompts.
+        // The ad-hoc signed release build cannot have it, and drops to the
+        // legacy file keychain instead. See `usesDataProtectionKeychain` for
+        // why, and for why the legacy keychain's prompt-on-every-launch problem
+        // does not apply to a Release build.
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecUseDataProtectionKeychain as String: true
+            kSecAttrService as String: service
         ]
+        if usesDataProtectionKeychain {
+            query[kSecUseDataProtectionKeychain as String] = true
+        }
         if let account { query[kSecAttrAccount as String] = account }
         return query
     }

@@ -112,24 +112,51 @@ final class KeychainPairingStoreTests: XCTestCase {
         //
         // `kSecUseDataProtectionKeychain` must match the store's own queries.
         // macOS has two separate keychains, and the flag chooses between them,
-        // so without it this writes to the legacy one while the store reads the
-        // modern one. The symptom is not a missing item but `errSecDuplicateItem`
-        // on the second run, because the legacy writes accumulate where nothing
-        // ever cleans them up.
+        // so a mismatch writes to one while the store reads the other. The
+        // symptom is not a missing item but `errSecDuplicateItem` on the second
+        // run, because the writes accumulate where nothing ever cleans them up.
+        //
+        // The flag is read from the store rather than hardcoded, because which
+        // keychain is available depends on how the test host was signed. An
+        // ad-hoc host has no `keychain-access-groups` entitlement and a
+        // hardcoded `true` here fails with -34018.
         let id = try XCTUnwrap(PairingID(bytes: Data(repeating: 8, count: 8)))
-        let query: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: testService,
             kSecAttrAccount as String: id.hexString,
             kSecValueData as String: Data([0x00, 0x01, 0x02]), // not valid JSON
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-            kSecUseDataProtectionKeychain as String: true
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
+        if store.usesDataProtectionKeychain {
+            query[kSecUseDataProtectionKeychain as String] = true
+        }
         let status = SecItemAdd(query as CFDictionary, nil)
         XCTAssertEqual(status, errSecSuccess)
 
         XCTAssertThrowsError(try store.load(id: id)) { error in
             XCTAssertEqual(error as? KeychainError, .malformedStoredRecord)
         }
+    }
+
+    func testSavingWorksWhicheverKeychainThisBuildIsAllowed() throws {
+        // The released .dmg is ad-hoc signed and has no entitlements, so it
+        // cannot use the data protection keychain at all. This asserts the round
+        // trip works either way, which is the thing that was silently broken
+        // before the fallback existed: pairing succeeded, then `save` threw
+        // -34018 and the pairing was lost.
+        let saved = try record(0x5A, name: "either keychain")
+        XCTAssertNoThrow(try store.save(saved))
+        XCTAssertEqual(try store.load(id: saved.id), saved)
+    }
+
+    func testTheBackendProbeLeavesNothingBehindInLoadAll() throws {
+        // The probe writes a throwaway item under the same service. Its account
+        // is deliberately not `PairingID`-shaped, so even a leftover one must
+        // never show up as a pairing.
+        _ = store.usesDataProtectionKeychain
+        let saved = try record(0x6B, name: "only me")
+        try store.save(saved)
+        XCTAssertEqual(try store.loadAll().map(\.peerName), ["only me"])
     }
 }
