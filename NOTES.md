@@ -1024,3 +1024,5 @@ A bulk edit that replaced a range between two string markers silently deleted
 **14 unrelated tests** that happened to sit between them. Caught only because the
 iPad count fell from 377 to 365 and the number was checked rather than glanced
 at. Restored from `git show HEAD:`. Watch index-to-index slicing on source files.
+
+## 2026-08-15 11:54 — (auto session marker)

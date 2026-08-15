@@ -31,6 +31,7 @@ Full explanation in [01-apple-signing.md](01-apple-signing.md).
 | [06-how-the-code-fits.md](06-how-the-code-fits.md) | The shape of the codebase and why it is split that way |
 | [07-gestures-and-keyboard.md](07-gestures-and-keyboard.md) | Every gesture, the on-screen keyboard, and how the modifier keys behave |
 | [08-the-next-app.md](08-the-next-app.md) | **What to do differently on the next app.** The only file here that is not about Padlink |
+| [09-starting-a-new-app.md](09-starting-a-new-app.md) | **Scaffolding a new Mac plus iPad app from zero.** The `project.yml` and `Package.swift` to copy |
 
 ## The 60 second version
 

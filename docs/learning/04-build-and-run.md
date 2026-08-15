@@ -20,33 +20,26 @@ Without it, `swift test` fails with `no such module 'Testing'`, because the
 Command Line Tools do not ship swift-testing. If that error ever appears, this is
 why.
 
-## Where the code lives, and why it is confusing
-
-The app is on a branch in a **git worktree**, not on `main`:
+## Where the code lives
 
 ```
-/Users/hengkysandy/claude-chats/first-mobile-app/                    <- main branch
-/Users/hengkysandy/claude-chats/first-mobile-app/.claude/worktrees/padlink-mac/   <- the app
+/Users/hengkysandy/claude-chats/first-mobile-app/Padlink
 ```
 
-A worktree is a second checkout of the same repository, on a different branch, in
-a different folder. The work was isolated there so `main` stayed clean.
-
-**This has bitten us repeatedly.** Running commands in
-`first-mobile-app/Padlink` fails with "does not contain a scheme named
-PadlinkMac", because on `main` the app genuinely does not exist yet.
-
-Always work here:
-
-```bash
-cd /Users/hengkysandy/claude-chats/first-mobile-app/.claude/worktrees/padlink-mac/Padlink
-```
+The app was built on a branch in a git worktree so `main` stayed clean, and that
+**bit us repeatedly**: running commands in the wrong one of the two folders fails
+with "does not contain a scheme named PadlinkMac". That worktree is merged now, so
+everything runs from the repository itself.
 
 A useful shell alias:
 
 ```bash
-alias padlink='cd /Users/hengkysandy/claude-chats/first-mobile-app/.claude/worktrees/padlink-mac/Padlink && ./padlink'
+alias padlink='./padlink'
 ```
+
+Starting a **new** app rather than building this one? See
+[09-starting-a-new-app.md](09-starting-a-new-app.md), which has the `project.yml`
+and `Package.swift` skeletons with every non-obvious key explained.
 
 ## The `padlink` script
 
@@ -102,11 +95,14 @@ the build complains about missing files, run it.
 
 Three suites, three different runners:
 
-| Suite | Framework | Count |
+| Suite | Framework | Count at MVP |
 |---|---|---|
-| `PadlinkCore` | swift-testing | 114 |
-| `PadlinkMac` | XCTest | 66 |
-| `PadlinkPadTests` | XCTest | 231 |
+| `PadlinkCore` | swift-testing | 125 |
+| `PadlinkMac` | XCTest | 113 |
+| `PadlinkPadTests` | XCTest | 379 |
+
+**Read the count, not just the green tick.** A bulk edit once deleted 14 tests
+and every remaining one passed. The falling number was the only signal.
 
 Core uses swift-testing because it is a plain SwiftPM package. The app targets use
 XCTest because they need a host application.
