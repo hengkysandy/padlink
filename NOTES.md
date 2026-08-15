@@ -1127,3 +1127,27 @@ exact release signing.
 **Merged into `main` on 2026-08-15** after review, along with all six worktrees
 being retired. The keychain probe was checked line by line before merging,
 because it decides where the pairing secret is stored.
+
+## 2026-08-15 — Merged everything and retired the worktrees
+
+- Merged `worktree-agent-a76e1428a481392ef` (the .dmg packaging and the keychain
+  fallback) into `main`. One conflict, in `NOTES.md`, where both sides had only
+  appended. Kept both, in chronological order.
+- Reviewed the keychain probe before merging, because it decides where the
+  pairing secret is stored. It probes with a **write** rather than a read, which
+  is the correct call: reading the wrong keychain returns `errSecItemNotFound`,
+  indistinguishable from an app that has never paired, so a read-based probe
+  would silently pick the wrong backend and make an existing pairing look lost.
+- Verified the published .dmg independently rather than trusting the agent:
+  downloaded from the release, mounted, and scanned. No `embedded.provisionprofile`,
+  `Signature=adhoc`, `TeamIdentifier=not set`, and no team id, work email, personal
+  email or UUID-shaped string anywhere in the bundle.
+- Fetched the `v0.1.0-alpha` tag locally first, so deleting branches could not
+  orphan the released commit. Confirmed it is reachable from `main`.
+- **Removed all six worktrees and their branches. 1.8 GB freed.** Checked first:
+  the only dirty one held duplicate test helpers that already exist on `main`,
+  left by a killed agent. `.padlink-device` is only an override, the script
+  auto-detects the iPad, so nothing gitignored was lost.
+- Fixed the last two docs that still told you to `cd` into the deleted worktree.
+
+Repository is now one folder on `main`. Suites: **Core 125, Mac 115, iPad 379.**

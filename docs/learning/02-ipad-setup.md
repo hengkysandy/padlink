@@ -45,7 +45,7 @@ access to your unlocked iPad cannot quietly enable it.
 From the project folder:
 
 ```bash
-cd /Users/hengkysandy/claude-chats/first-mobile-app/.claude/worktrees/padlink-mac/Padlink
+cd /Users/hengkysandy/claude-chats/first-mobile-app/Padlink
 ./padlink pad
 ```
 

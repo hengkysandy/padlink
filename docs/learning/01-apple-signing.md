@@ -40,7 +40,7 @@ That is the design.** Apple wants a paid membership for anything long-lived.
 Reinstalling resets the clock. It takes 2 minutes:
 
 ```
-cd .../worktrees/padlink-mac/Padlink
+cd /Users/hengkysandy/claude-chats/first-mobile-app/Padlink
 ./padlink pad
 ```
 
