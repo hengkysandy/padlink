@@ -1210,3 +1210,25 @@ side without knowing the sha:
   assets still resolve.
 
 Final state: one branch (`main`) local and remote, two tags, one working folder.
+
+## 2026-08-15 12:24 — (auto session marker)
+
+## 2026-08-15 — Wrote the beginner walkthrough
+
+User asked for the whole journey explained simply, since the existing learning
+files each go deep on one topic and none of them says how the pieces fit for
+someone new.
+
+New file: `docs/learning/10-the-whole-picture.md`. Covers the language, the tools,
+why Xcode is installed but never opened, XcodeGen, how the project started (spec,
+plan, spike), the three-way code split, building, testing, installing to the iPad
+over the cable, packaging the .dmg, and the four layers of the connection
+(Bonjour, QR pairing, TLS with a pre-shared key, the byte protocol), ending with
+`CGEvent` and why the Accessibility permission is the thing that silently breaks
+everything.
+
+Put at the **top** of the index in `00-start-here.md` as "read this first", ahead
+of `01`, because the numbered files are topic references and this is the map.
+
+Also fixed the index row for `04`, which still advertised the git worktree that no
+longer exists.

@@ -23,10 +23,11 @@ Full explanation in [01-apple-signing.md](01-apple-signing.md).
 
 | File | What it answers |
 |---|---|
+| **[10-the-whole-picture.md](10-the-whole-picture.md)** | **Read this first.** The whole project end to end in plain English: language, tools, how it was built, tested, installed, packaged, and how the two devices talk |
 | [01-apple-signing.md](01-apple-signing.md) | Certificates, team id, provisioning profiles, what expires and when, free vs paid account |
 | [02-ipad-setup.md](02-ipad-setup.md) | Developer Mode, trusting the certificate, installing to the device |
 | [03-macos-permissions.md](03-macos-permissions.md) | Accessibility permission, the keychain password prompts, why both keep coming back |
-| [04-build-and-run.md](04-build-and-run.md) | The `padlink` script, the git worktree, XcodeGen, running the tests |
+| [04-build-and-run.md](04-build-and-run.md) | The `padlink` script, XcodeGen, running the three test suites |
 | [05-gotchas.md](05-gotchas.md) | Every trap we hit, with the symptom that led us there |
 | [06-how-the-code-fits.md](06-how-the-code-fits.md) | The shape of the codebase and why it is split that way |
 | [07-gestures-and-keyboard.md](07-gestures-and-keyboard.md) | Every gesture, the on-screen keyboard, and how the modifier keys behave |
