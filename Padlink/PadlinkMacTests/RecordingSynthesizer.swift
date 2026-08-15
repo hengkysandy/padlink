@@ -13,6 +13,7 @@ final class RecordingSynthesizer: InputSynthesizing {
         case insertText(String)
         case key(virtualCode: UInt16, isDown: Bool, modifiers: KeyModifiers)
         case modifierKey(KeyModifiers, isDown: Bool)
+        case systemAction(SystemAction)
     }
 
     private(set) var calls: [Call] = []
@@ -43,5 +44,9 @@ final class RecordingSynthesizer: InputSynthesizing {
 
     func postModifierKey(_ modifier: KeyModifiers, isDown: Bool) {
         calls.append(.modifierKey(modifier, isDown: isDown))
+    }
+
+    func perform(_ action: SystemAction) {
+        calls.append(.systemAction(action))
     }
 }

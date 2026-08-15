@@ -907,6 +907,59 @@ Suites: **Core 120, Mac 108, iPad 377.** Commit `1e5ff36`, pushed. iPad redeploy
   modifier genuinely held.
 - Drag to select, and momentum, both still unverified by hand.
 
+## 2026-08-15 11:15 — (auto session marker)
+
+## 2026-08-15 — Why the swipes cannot work: measured, not guessed
+
+Question from the user: is this a limitation, should we drop it? Answered with
+seven experiments run directly on the Mac (`AXIsProcessTrusted()` returned true,
+so this process could post real events). Scratch tools are in the session
+scratchpad, not committed.
+
+| Experiment | Result |
+|---|---|
+| Post a mouse move, read back the cursor position | **works** |
+| `postModifierKey` technique, then read `CGEventSource.flagsState` | **COMMAND HELD**, so it works |
+| Same via a real `.flagsChanged` event | also works, so the current technique was never the problem |
+| Command+A then Command+C into TextEdit, then `pbpaste` | **works**, clipboard got the file contents |
+| Command+Shift+3 (system hotkey) | **no screenshot file created** |
+| Control+Up (system hotkey, Mission Control) | **does not open** |
+| `open -a "Mission Control"` | **opens**, confirmed in a screenshot |
+| Event tap reading back a flagged scroll | delivered as `flags=[command]`, both pixel and line units |
+
+### The finding
+
+**macOS does not let a synthesized `CGEvent` trigger a system level symbolic
+hotkey.** Ordinary application shortcuts work perfectly (Command+A, Command+C).
+Anything the WindowServer or Dock owns does not.
+
+So this is not a bug in Padlink and no amount of work on the keystroke path will
+fix it. What it kills:
+
+- Three fingers up (Mission Control, Control+Up). **Has a workaround**: launch
+  `/System/Applications/Mission Control.app`. Proven to work.
+- Three fingers down (App Exposé, Control+Down). No app to launch. No workaround
+  found.
+- Four fingers left and right (switch spaces, Control+Left/Right). No public API.
+  Dead.
+
+What still should work, and was probably tested in the wrong app:
+
+- Three fingers left and right (Command+[ and Command+]) are **ordinary app
+  shortcuts**, so they work. They need an app with back and forward, so Safari or
+  Finder, not a text editor.
+- **Zoom is being sent correctly.** The tap readback proves the Command flag
+  arrives on the scroll. It will zoom in Safari, Chrome and Finder. It will not
+  zoom in Preview, which wants a real `NSEvent.magnify`, and macOS has no public
+  API to synthesize one. That constraint was already in the design doc.
+
+### Housekeeping from the experiments
+
+- The clipboard was overwritten and then cleared.
+- Preview was opened and closed again.
+- The mouse cursor was moved.
+- `/tmp/padlink-probe.txt` was created and deleted.
+
 ## 2026-08-15 — Ship the Mac app as a .dmg, ad-hoc signed
 
 Goal: a downloadable build the user can install on a second MacBook. The repo is
@@ -979,7 +1032,10 @@ the bundle identifier and is already public in `project.yml`.
   path. A fresh copy at a new path ran. So the note to users is: remove the
   quarantine first, then open.
 
-**Known limitation confirmed earlier today.** A synthesized `CGEvent` cannot
-trigger system level hotkeys. `Cmd+A` and `Cmd+C` work, `Ctrl+Up` (Mission
-Control) and `Cmd+Shift+3` (screenshot) do nothing. So three-finger up/down and
-four-finger swipes do not work. This is a macOS restriction, not an app bug.
+**Known limitations as shipped.** Merged `origin/main` before cutting the .dmg,
+so the build carries the `systemAction` work from `ec97a7b`. That changes the
+limitation list: three fingers up now opens Mission Control, because the Mac
+launches Mission Control.app instead of posting a keystroke macOS ignores. Three
+fingers down (App Exposé) and the four-finger swipes still do nothing, because
+neither has a route that does not go through a system level hotkey. That is a
+macOS restriction, not an app bug, and the release notes say so.

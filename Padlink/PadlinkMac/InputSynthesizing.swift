@@ -19,4 +19,6 @@ protocol InputSynthesizing: AnyObject {
     func insertText(_ text: String)
     func postKey(virtualCode: UInt16, isDown: Bool, modifiers: KeyModifiers)
     func postModifierKey(_ modifier: KeyModifiers, isDown: Bool)
+    /// Not input at all. See `SystemAction` for why this is a separate verb.
+    func perform(_ action: SystemAction)
 }

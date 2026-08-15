@@ -14,6 +14,7 @@ private let allClientMessages: [ClientMessage] = [
     .keyCode(key: .c, isDown: true, modifiers: [.command]),
     .keyCode(key: .f12, isDown: false, modifiers: [.shift, .control, .option, .command, .function]),
     .modifierState(modifiers: [.command, .function]),
+    .systemAction(.missionControl),
     .ping(seq: 4_000_000_000)
 ]
 
@@ -52,6 +53,28 @@ func serverMessagesRoundTrip(message: ServerMessage) throws {
 @Test func modifierStateUsesTypeByte8() throws {
     let encoded = try ClientMessageCodec.encode(.modifierState(modifiers: [.command]))
     #expect(encoded.first == 8)
+}
+
+@Test func systemActionUsesTypeByte9() throws {
+    let encoded = try ClientMessageCodec.encode(.systemAction(.missionControl))
+    #expect(encoded.first == 9)
+}
+
+/// An action this Mac has never heard of is rejected, not skipped. A newer iPad
+/// asking for something the Mac cannot do must not look as though it worked.
+@Test func anUnknownSystemActionIsRejected() throws {
+    let encoded = Data([9, 200])
+    #expect(throws: CodecError.unknownSystemAction(200)) {
+        try ClientMessageCodec.decode(encoded)
+    }
+}
+
+/// Every action must survive the wire. A new case added without a codec change
+/// would fail here rather than in someone's hand.
+@Test(arguments: SystemAction.allCases)
+func everySystemActionRoundTrips(action: SystemAction) throws {
+    let message = ClientMessage.systemAction(action)
+    #expect(try ClientMessageCodec.decode(try ClientMessageCodec.encode(message)) == message)
 }
 
 @Test func modifierStateRejectsReservedBits() {

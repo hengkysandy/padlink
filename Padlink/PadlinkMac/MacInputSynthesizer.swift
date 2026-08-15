@@ -1,4 +1,5 @@
 // Padlink/PadlinkMac/MacInputSynthesizer.swift
+import AppKit
 import CoreGraphics
 import PadlinkCore
 
@@ -125,6 +126,28 @@ final class MacInputSynthesizer: InputSynthesizing {
             keyDown: isDown
         ) else { return }
         event.post(tap: .cghidEventTap)
+    }
+
+    func perform(_ action: SystemAction) {
+        switch action {
+        case .missionControl:
+            // Launching the app, rather than posting Control and Up.
+            //
+            // Mission Control's shortcut belongs to the Dock, and a shortcut
+            // the Dock owns cannot be triggered by an event this app posts.
+            // That was measured on real hardware: `CGEvent` for Command+A and
+            // Command+C work, and Control+Up and Command+Shift+3 do nothing at
+            // all. Opening the app is a different route to the same place, and
+            // it is a supported one.
+            //
+            // `Mission Control.app` is a real bundle in `/System/Applications`,
+            // so this needs no private API and no extra permission.
+            let url = URL(fileURLWithPath: "/System/Applications/Mission Control.app")
+            NSWorkspace.shared.openApplication(
+                at: url,
+                configuration: NSWorkspace.OpenConfiguration()
+            )
+        }
     }
 
     static func cgFlags(from modifiers: KeyModifiers) -> CGEventFlags {

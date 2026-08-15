@@ -6,6 +6,23 @@ public enum PointerButton: UInt8, Sendable, Hashable, CaseIterable {
     case right = 1
 }
 
+/// Something only the Mac itself can do, named rather than spelled out as input.
+///
+/// **This exists because a synthesized event cannot trigger a macOS system
+/// hotkey.** That was measured, not assumed: Command+A and Command+C posted with
+/// `CGEvent` work perfectly, and Control+Up and Command+Shift+3 do nothing at
+/// all. The WindowServer and the Dock own those, and they ignore events the app
+/// posts. So a three finger swipe up cannot be Control+Up, however correctly it
+/// is sent.
+///
+/// The answer is to stop describing the keystroke and start describing the
+/// intent, and let the Mac reach it by whatever route actually works. Only
+/// actions with a route are listed here. App Exposé and switching spaces have
+/// none, so they are absent rather than present and broken.
+public enum SystemAction: UInt8, Sendable, Hashable, CaseIterable {
+    case missionControl = 1
+}
+
 /// Sent by the iPad.
 public enum ClientMessage: Sendable, Equatable {
     case hello(protocolVersion: UInt16, deviceName: String)
@@ -25,6 +42,9 @@ public enum ClientMessage: Sendable, Equatable {
     /// It is absolute, not a delta, so a lost message self-corrects on the
     /// next one instead of leaving the two sides permanently disagreeing.
     case modifierState(modifiers: KeyModifiers)
+    /// Ask the Mac to do something itself, rather than describing the input for
+    /// it. See `SystemAction`.
+    case systemAction(SystemAction)
     case ping(seq: UInt32)
 }
 

@@ -91,6 +91,24 @@ final class MessageRouterTests: XCTestCase {
         XCTAssertEqual(synthesizer.calls.last, .scroll(deltaX: 0, deltaY: 12, modifiers: []))
     }
 
+    /// A system action is passed straight through, and holds nothing.
+    ///
+    /// It exists because macOS ignores a synthesized event for a hotkey the
+    /// Dock owns, so Mission Control cannot be reached as Control and Up.
+    func testASystemActionIsPerformedRatherThanTypedOut() {
+        router.handle(.systemAction(.missionControl))
+        XCTAssertEqual(synthesizer.calls, [.systemAction(.missionControl)])
+    }
+
+    /// Nothing to release afterwards. A held key or button has a matching
+    /// release that can leak; this does not, and `releaseEverything` must not
+    /// invent one.
+    func testASystemActionLeavesNothingHeld() {
+        router.handle(.systemAction(.missionControl))
+        router.releaseEverything()
+        XCTAssertEqual(synthesizer.calls, [.systemAction(.missionControl)])
+    }
+
     func testModifierStatePostsOnlyWhatChanged() {
         router.handle(.modifierState(modifiers: [.command]))
         XCTAssertEqual(synthesizer.calls, [.modifierKey(.command, isDown: true)])

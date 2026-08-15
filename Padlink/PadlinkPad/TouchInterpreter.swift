@@ -822,16 +822,35 @@ final class TouchInterpreter {
         let isHorizontal = abs(dx) > abs(dy)
 
         if isHorizontal == false {
-            // Up is Mission Control, down is App Exposé, for three fingers and
-            // four alike. macOS treats them the same way here, and so does
-            // everyone's muscle memory.
-            return stroke(dy < 0 ? .arrowUp : .arrowDown, .control)
+            // Up is Mission Control, and it is the one gesture here that is not
+            // a keystroke.
+            //
+            // It used to be Control and Up, which is the right shortcut and
+            // simply does not work: the Dock owns it, and a shortcut the Dock
+            // owns ignores an event this app posts. Measured on real hardware,
+            // alongside Command+A and Command+C which work perfectly. So the
+            // iPad names what it wants and lets the Mac find a route.
+            if dy < 0 { return [.systemAction(.missionControl)] }
+
+            // Down was App Exposé, Control and Down, which is blocked in
+            // exactly the same way and has no app to open instead. Sending the
+            // keystroke anyway would be sending something known not to work, so
+            // this sends nothing. The docs say so rather than the code
+            // pretending otherwise.
+            return []
         }
 
         if fingers == 3 {
+            // Page back and forward. These are ordinary application shortcuts,
+            // not system ones, so they do reach the Mac. They need an app that
+            // has a back and a forward, which is why they look dead in a text
+            // editor and work in Safari and Finder.
             return stroke(dx > 0 ? .leftBracket : .rightBracket, .command)
         }
-        return stroke(dx < 0 ? .arrowRight : .arrowLeft, .control)
+        // Four fingers sideways was switching spaces, Control and an arrow.
+        // Blocked like every other system shortcut, and unlike Mission Control
+        // there is no public way to reach it at all. Nothing is sent.
+        return []
     }
 
     /// A whole keystroke: down, then up, both carrying the same modifiers.

@@ -11,6 +11,7 @@ public enum ClientMessageCodec {
         case keyCode = 6
         case ping = 7
         case modifierState = 8
+        case systemAction = 9
     }
 
     public static func encode(_ message: ClientMessage) throws -> Data {
@@ -44,6 +45,9 @@ public enum ClientMessageCodec {
         case let .modifierState(modifiers):
             writer.write(TypeByte.modifierState.rawValue)
             writer.write(modifiers.rawValue)
+        case let .systemAction(action):
+            writer.write(TypeByte.systemAction.rawValue)
+            writer.write(action.rawValue)
         case let .ping(seq):
             writer.write(TypeByte.ping.rawValue)
             writer.write(seq)
@@ -102,6 +106,15 @@ public enum ClientMessageCodec {
                 throw CodecError.reservedModifierBitsSet(rawModifiers)
             }
             message = .modifierState(modifiers: KeyModifiers(rawValue: rawModifiers))
+        case .systemAction:
+            let rawAction = try reader.readUInt8()
+            // An unknown action is rejected rather than ignored. A newer iPad
+            // asking an older Mac for something it cannot do must not look like
+            // it worked.
+            guard let action = SystemAction(rawValue: rawAction) else {
+                throw CodecError.unknownSystemAction(rawAction)
+            }
+            message = .systemAction(action)
         case .ping:
             message = .ping(seq: try reader.readUInt32())
         }

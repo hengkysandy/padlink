@@ -420,15 +420,17 @@ private struct LayoutPicker: View {
             .navigationTitle("Keyboard")
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
-                // The one thing about this app that cannot be fixed in code,
-                // put where somebody hunting for gesture settings will find it.
-                // iPadOS keeps four and five finger swipes for itself and there
-                // is no way for an app to take them back, so without this the
-                // gesture simply does nothing and looks broken.
-                Text("Four-finger swipes are used by iPadOS itself. To use them "
-                    + "here, turn off Four and Five Finger Gestures in Settings, "
-                    + "General, Multitasking & Gestures. Three-finger swipes need "
-                    + "no changes.")
+                // The two things about this app that cannot be fixed in code,
+                // put where somebody hunting for gesture settings will find
+                // them. Both make a gesture do nothing at all, which without a
+                // note like this reads as the app being broken.
+                Text("Swipe three fingers up for Mission Control, and left or "
+                    + "right to go back and forward in Safari and Finder. "
+                    + "Swiping down, and four-finger swipes, do nothing: macOS "
+                    + "does not accept those shortcuts from another device. "
+                    + "iPadOS also keeps four and five finger swipes for itself "
+                    + "unless you turn off Four and Five Finger Gestures in "
+                    + "Settings, General, Multitasking & Gestures.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.leading)
