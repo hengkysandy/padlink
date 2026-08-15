@@ -788,3 +788,71 @@ argument for hand testing even when coverage looks complete.
   whether the fingers were seen at all.
 
 ## 2026-08-14 21:20 — (auto session marker)
+
+## 2026-08-15 — Hand test: only click, right click and scroll work
+
+User on the iPad: "all gesture not work, on ipad touchpad it only work with left
+click and right click and scroll, thats all". So broken: pinch zoom, three-finger
+swipe, four-finger swipe, drag to select, momentum.
+
+Followed systematic-debugging. Two root causes found and fixed, both for zoom.
+Nothing guessed at for the rest.
+
+### Root cause 1 (iPad): the spread was half the pinch
+
+- `TouchInterpreter.spread(of:)` returned the **mean distance from the centroid**,
+  which for two fingers is exactly half the distance between them.
+- `decide(travel:spreadChange:)` compares that directly against the centroid's
+  **full** travel, and ties go to `.scroll`.
+- Anchor a thumb, move one finger by D: separation grows by D so the old measure
+  grew by D/2, and the centroid moves by D/2. Exactly equal. Always a scroll.
+- A pinch could only zoom when both fingers moved the same amount, holding the
+  centroid still. **Every existing zoom test did exactly that**, which is how the
+  bug survived a full suite.
+- Fix: `spread` returns `2 * mean`, so it is the real separation. Zoom scale
+  `0.25` to `0.125` so the product, and the feel, are unchanged.
+- Two new tests (`testAPinchWithOneFingerAnchoredStillZooms`, and the inward one)
+  fail before the fix and pass after. Confirmed by running them.
+
+### Root cause 2 (Mac): the scroll carried no modifier flags
+
+- A zoom is Command held across a scroll. `MacInputSynthesizer.scroll` created a
+  `CGEvent` and never set `flags`.
+- macOS reads the Command flag **off the scroll event itself**, so a Command that
+  was genuinely held still produced an ordinary scroll.
+- Fix: `InputSynthesizing.scroll` now takes `modifiers`, `MessageRouter` passes
+  `held.heldModifiers`, and the synthesizer sets `event.flags`.
+
+### Still no root cause: three fingers, four fingers, drag
+
+Not guessed at. Added instrumentation instead, so one hand test tells the three
+silent failures apart:
+
+- `TouchInterpreter.Activity` (`idle`, `pointer`, `deciding`, `scroll`, `zoom`,
+  `multi(fingers:fired:)`, `cancelled`), shown under the finger count on the
+  trackpad.
+- Reads **"cancelled by iPadOS"** in orange if the system confiscates the touches,
+  which is invisible from the chair and looks identical to the feature not
+  existing.
+- The readout is now reported only when it **changes**. It writes SwiftUI state and
+  was firing on every touch event, asking SwiftUI to re-evaluate the whole screen
+  up to 120 times a second during a drag.
+
+Suites after: **Core 120, Mac 108, iPad 372**, all passing. Commit `ff0a157`,
+pushed to `main`. Both apps rebuilt and deployed.
+
+### Transport question (Wi-Fi vs Bluetooth)
+
+Checked `PadlinkTransport.parameters`:
+- `tcp.noDelay = true` already set, which is the single biggest win for a stream
+  of tiny packets.
+- `includePeerToPeer = false` set explicitly on both ends. Turning it on enables
+  AWDL, a direct device-to-device link that skips the router. Real tradeoff: it
+  time-slices the Wi-Fi radio, so it can cut median latency and raise jitter.
+- `serviceClass` not set. Setting it marks the traffic for the interactive Wi-Fi
+  queue. Cheap, low risk, not yet done.
+
+Bluetooth would be worse, not better. BLE's connection interval (iOS negotiates
+15 to 30ms, floor 7.5ms) is a latency floor above what Wi-Fi already delivers, and
+the throughput is far too low for a stream of pointer moves. Classic SPP is not
+available to third-party iOS apps without MFi hardware.
