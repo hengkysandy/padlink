@@ -856,3 +856,5 @@ Bluetooth would be worse, not better. BLE's connection interval (iOS negotiates
 15 to 30ms, floor 7.5ms) is a latency floor above what Wi-Fi already delivers, and
 the throughput is far too low for a stream of pointer moves. Classic SPP is not
 available to third-party iOS apps without MFi hardware.
+
+## 2026-08-15 11:06 — (auto session marker)

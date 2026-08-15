@@ -59,10 +59,19 @@ do {
         print("Sent: type \(arguments[1].count) characters")
 
     case "key":
+        // Named keys first, because the arrows have no character to look up and
+        // they are exactly the ones a three or four finger swipe sends. Without
+        // them the swipe keystroke cannot be fired at the Mac from here, and
+        // "the iPad never sent it" cannot be told apart from "the Mac ignored
+        // it" without an iPad in your hand.
+        let named: [String: PadlinkKey] = [
+            "up": .arrowUp, "down": .arrowDown, "left": .arrowLeft, "right": .arrowRight
+        ]
         guard arguments.count >= 2,
-              let character = arguments[1].first,
-              let key = KeyRouter.padlinkKey(forCharacter: character)
+              let key = named[arguments[1]]
+                ?? arguments[1].first.flatMap(KeyRouter.padlinkKey(forCharacter:))
         else { throw TestClientError.usage }
+        let character = arguments[1]
         let mods = modifiers(from: arguments)
         try await TestClient.send([
             .keyCode(key: key, isDown: true, modifiers: mods),

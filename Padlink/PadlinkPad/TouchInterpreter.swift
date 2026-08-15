@@ -196,6 +196,9 @@ final class TouchInterpreter {
         var velocityX: Double
         var velocityY: Double
         var lastMovedAt: TimeInterval
+        /// False for a two finger gesture the hand arrived at on its way *down*
+        /// from three or four fingers. See `fingersOnlyAdded`.
+        let tapEligible: Bool
     }
 
     /// Three or four fingers: one swipe, which fires at most one keystroke.
@@ -224,6 +227,25 @@ final class TouchInterpreter {
 
     private var gesture: Gesture = .none
     private var activeIDs: Set<TouchID> = []
+
+    /// True while fingers have only ever been **added** since the hand last
+    /// left the glass.
+    ///
+    /// This is what makes a two finger tap a right click without also making
+    /// the end of a three finger swipe one.
+    ///
+    /// Neither simpler rule works. "The gesture started from rest" is too
+    /// strict, because the two fingers of a real tap land milliseconds apart,
+    /// so almost every genuine two finger tap arrives as one finger and then
+    /// two. "Two fingers are down and have not moved" is too loose, because a
+    /// hand lifting from a three finger swipe passes through two fingers on the
+    /// way out, and that moment has no travel and no elapsed time, which is
+    /// indistinguishable from a deliberate tap. That is what made every three
+    /// and four finger gesture end by opening a context menu on the Mac.
+    ///
+    /// The thing that actually separates them is the direction the finger count
+    /// is travelling, which neither the count nor the phase records.
+    private var fingersOnlyAdded = true
     /// Exactly one, mutated in place. See the note on the type.
     private var throttle = MoveThrottle()
     private var buttonIsDown = false
@@ -344,6 +366,12 @@ final class TouchInterpreter {
         }
 
         let wasAtRest = isAtRest
+        // Recorded before the gesture that is about to start reads it, and
+        // after the one that is ending has already stored its own answer.
+        if event.active.count < activeIDs.count {
+            fingersOnlyAdded = false
+        }
+
         var messages = finishGesture(
             remainingCount: event.active.count,
             at: event.timestamp,
@@ -351,6 +379,10 @@ final class TouchInterpreter {
         )
         messages += beginGesture(event.active, at: event.timestamp, mayTapOrChain: wasAtRest)
         activeIDs = ids
+        // The hand is off the glass, so the next gesture starts fresh.
+        if event.active.isEmpty {
+            fingersOnlyAdded = true
+        }
         refreshActivity(cancelled: false)
         return messages
     }
@@ -377,6 +409,7 @@ final class TouchInterpreter {
         pendingScrollY = 0
         momentum = nil
         activity = .idle
+        fingersOnlyAdded = true
         return messages
     }
 
@@ -427,6 +460,9 @@ final class TouchInterpreter {
         // A cancelled gesture cannot open the drag window. Leaving it open
         // would make the next ordinary touch silently hold the button down.
         lastTapEndedAt = nil
+        // Nor can whatever is left of the hand right click. Only a hand that
+        // has fully left the glass starts a fresh chain.
+        fingersOnlyAdded = remaining.isEmpty
         messages += beginGesture(remaining, at: timestamp, mayTapOrChain: false)
         activeIDs = Set(remaining.map(\.id))
         return messages
@@ -486,7 +522,12 @@ final class TouchInterpreter {
             // two finger gesture with no travel and no time elapsed, which
             // looks exactly like a tap, and every three finger swipe would open
             // a context menu before it started.
+            // `tapEligible` is the way *down* in finger count and
+            // `remainingCount < 2` is the way up. Both are needed, and neither
+            // covers the other: a third finger landing ends this gesture with
+            // no travel and no time, and so does the third finger leaving.
             let wasTap = !cancelled
+                && two.tapEligible
                 && two.mode == .undecided
                 && remainingCount < 2
                 && timestamp - two.startedAt <= Self.tapMaxDuration
@@ -603,7 +644,8 @@ final class TouchInterpreter {
                 maxTravel: 0,
                 velocityX: 0,
                 velocityY: 0,
-                lastMovedAt: timestamp
+                lastMovedAt: timestamp,
+                tapEligible: fingersOnlyAdded
             ))
 
         default:

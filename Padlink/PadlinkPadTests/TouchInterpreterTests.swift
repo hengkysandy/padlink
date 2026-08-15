@@ -662,6 +662,80 @@ final class TouchInterpreterTests: XCTestCase {
         )
     }
 
+    // MARK: - Lifting fingers from a bigger gesture
+
+    /// A hand does not leave the glass all at once. Three fingers lift as
+    /// three, then two, then one, then none, and the two finger moment on the
+    /// way down is a brand new two finger gesture that has not moved and has
+    /// barely existed. That looks exactly like a deliberate two finger tap, so
+    /// every three finger swipe used to end by opening a context menu.
+    ///
+    /// `Pointer` already had `tapEligible` for precisely this reason. `TwoFinger`
+    /// did not, and `remainingCount < 2` only guards the way *up* in finger
+    /// count, not the way down.
+    func testAThreeFingerSwipeDoesNotEndInARightClick() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, row(3), at: 100))
+        _ = interpreter.handle(event(.moved, row(3, dy: -60), at: 100.05))
+
+        var sent = interpreter.handle(event(.ended, [(1, 0, -60), (2, 100, -60)], at: 100.1))
+        sent += interpreter.handle(event(.ended, [(1, 0, -60)], at: 100.13))
+        sent += interpreter.handle(event(.ended, [], at: 100.16))
+
+        XCTAssertFalse(
+            sent.contains(rightDown),
+            "lifting a three finger swipe opened a context menu on the Mac"
+        )
+    }
+
+    /// The same on the way out of a four finger swipe, which passes through
+    /// three and then two.
+    func testAFourFingerSwipeDoesNotEndInARightClick() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, row(4), at: 100))
+        _ = interpreter.handle(event(.moved, row(4, dx: -60), at: 100.05))
+
+        var sent = interpreter.handle(event(.ended, row(3, dx: -60), at: 100.1))
+        sent += interpreter.handle(event(.ended, row(2, dx: -60), at: 100.12))
+        sent += interpreter.handle(event(.ended, [], at: 100.15))
+
+        XCTAssertFalse(sent.contains(rightDown))
+    }
+
+    /// A scroll that loses one finger and gets it back must not click either.
+    /// Fingers flicker in and out of contact constantly during a real scroll.
+    func testAScrollThatBrieflyLosesAFingerDoesNotRightClick() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, row(2), at: 100))
+        _ = interpreter.handle(event(.moved, row(2, dy: 40), at: 100.05))
+        // One finger flickers off, then comes straight back.
+        _ = interpreter.handle(event(.ended, [(1, 0, 40)], at: 100.08))
+        var sent = interpreter.handle(event(.began, [(1, 0, 40), (3, 100, 40)], at: 100.09))
+        sent += interpreter.handle(event(.ended, [], at: 100.12))
+
+        XCTAssertFalse(sent.contains(rightDown))
+    }
+
+    /// The guard on the fix: a deliberate two finger tap, from a hand that was
+    /// off the glass, still right clicks. This is the behaviour the user has and
+    /// relies on, and it must survive.
+    func testADeliberateTwoFingerTapStillRightClicks() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, row(2), at: 100))
+        let sent = interpreter.handle(event(.ended, [], at: 100.1))
+        XCTAssertEqual(sent, [rightDown, rightUp])
+    }
+
+    /// And the common real shape of one: the two fingers land a few
+    /// milliseconds apart rather than together.
+    func testATwoFingerTapWhoseFingersLandSeparatelyStillRightClicks() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, [(1, 0, 0)], at: 100))
+        _ = interpreter.handle(event(.began, [(1, 0, 0), (2, 100, 0)], at: 100.02))
+        let sent = interpreter.handle(event(.ended, [], at: 100.12))
+        XCTAssertEqual(sent, [rightDown, rightUp])
+    }
+
     // MARK: - The readout
 
     /// The readout exists to tell three silent failures apart, so it has to be
