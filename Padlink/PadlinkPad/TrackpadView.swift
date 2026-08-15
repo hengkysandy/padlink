@@ -76,10 +76,18 @@ final class TrackpadCoordinator {
         }
     }
 
-    /// Reports how many fingers are on the surface, for the readout the user
-    /// sees. Called on every touch event, including the ones that produce no
-    /// message at all.
-    var onFingerCountChanged: (Int) -> Void = { _ in }
+    /// Reports how many fingers are on the surface and what the interpreter
+    /// made of them, for the readout the user sees.
+    var onGestureChanged: (Int, TouchInterpreter.Activity) -> Void = { _, _ in }
+
+    /// The last pair reported, so an unchanged one is not reported again.
+    ///
+    /// Load bearing, not a micro-optimisation. The closure writes SwiftUI
+    /// `@State`, and a touch event arrives up to 120 times a second while a
+    /// finger is down. Reporting an unchanged value on every one of them asks
+    /// SwiftUI to re-evaluate the whole screen, keyboard included, in the
+    /// middle of the one code path in this app that must stay cheap.
+    private var lastReported: (count: Int, activity: TouchInterpreter.Activity)?
 
     func deliver(_ event: TouchEvent) {
         for message in interpreter.handle(event) {
@@ -87,7 +95,11 @@ final class TrackpadCoordinator {
         }
         // After `handle`, not before, so the count and whatever the gesture did
         // are reported from the same event.
-        onFingerCountChanged(event.active.count)
+        let now = (count: event.active.count, activity: interpreter.activity)
+        if lastReported == nil || lastReported! != now {
+            lastReported = now
+            onGestureChanged(now.count, now.activity)
+        }
         syncDisplayLink()
     }
 
@@ -439,8 +451,8 @@ struct TrackpadView: UIViewRepresentable {
     /// what else was held before it can let go of Command alone.
     var lockedModifiers: KeyModifiers = []
 
-    /// How many fingers are on the surface right now.
-    var onFingerCountChanged: (Int) -> Void = { _ in }
+    /// How many fingers are on the surface, and what they were read as.
+    var onGestureChanged: (Int, TouchInterpreter.Activity) -> Void = { _, _ in }
 
     func makeCoordinator() -> TrackpadCoordinator {
         TrackpadCoordinator(send: send)
@@ -467,6 +479,6 @@ struct TrackpadView: UIViewRepresentable {
         // with it the interpreter's state, survives.
         context.coordinator.send = send
         context.coordinator.lockedModifiers = lockedModifiers
-        context.coordinator.onFingerCountChanged = onFingerCountChanged
+        context.coordinator.onGestureChanged = onGestureChanged
     }
 }

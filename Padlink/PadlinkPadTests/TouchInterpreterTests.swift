@@ -662,6 +662,117 @@ final class TouchInterpreterTests: XCTestCase {
         )
     }
 
+    // MARK: - The readout
+
+    /// The readout exists to tell three silent failures apart, so it has to be
+    /// right about which one happened. These pin each answer.
+    func testTheReadoutIsIdleWithNothingOnTheGlass() {
+        XCTAssertEqual(TouchInterpreter().activity, .idle)
+    }
+
+    func testTheReadoutNamesAScroll() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, row(2), at: 100))
+        _ = interpreter.handle(event(.moved, row(2, dy: 30), at: 100.02))
+        XCTAssertEqual(interpreter.activity, .scroll)
+    }
+
+    func testTheReadoutNamesAZoom() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, [(1, 0, 0), (2, 100, 0)], at: 100))
+        _ = interpreter.handle(event(.moved, [(1, 0, 0), (2, 160, 0)], at: 100.02))
+        XCTAssertEqual(interpreter.activity, .zoom)
+    }
+
+    /// The count comes from the interpreter, not from the raw touch list, so it
+    /// says how many fingers were understood rather than how many were sent.
+    func testTheReadoutCountsThreeFingersAndSaysTheSwipeFired() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, row(3), at: 100))
+        XCTAssertEqual(interpreter.activity, .multi(fingers: 3, fired: false))
+
+        _ = interpreter.handle(event(.moved, row(3, dy: -60), at: 100.05))
+        XCTAssertEqual(interpreter.activity, .multi(fingers: 3, fired: true))
+    }
+
+    /// The single most useful thing the readout can say. iPadOS taking the
+    /// touches away is invisible from the chair and looks exactly like the
+    /// gesture never having been built, which is how three finger swipes
+    /// shipped dead once already.
+    func testTheReadoutSaysWhenTheSystemTookTheTouchesAway() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, row(3), at: 100))
+        _ = interpreter.handle(event(.cancelled, [], at: 100.05))
+        XCTAssertEqual(interpreter.activity, .cancelled)
+    }
+
+    /// And that it survives long enough to be read. A cancellation ends with no
+    /// fingers on the glass, so anything that reset it to idle in the same
+    /// breath would leave nothing on screen.
+    func testACancellationIsStillReadableAfterTheFingersAreGone() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, row(3), at: 100))
+        _ = interpreter.handle(event(.cancelled, [], at: 100.05))
+        XCTAssertEqual(interpreter.activity.label, "cancelled by iPadOS")
+
+        // Cleared by the next real touch, not by time.
+        _ = interpreter.handle(event(.began, [(9, 0, 0)], at: 101))
+        XCTAssertEqual(interpreter.activity, .pointer)
+    }
+
+    /// The pinch nobody makes in a lab and everybody makes on a device: one
+    /// finger stays put and the other one moves.
+    ///
+    /// Every other zoom test here moves both fingers by the same amount, which
+    /// holds the centroid perfectly still and hands the decision to the spread
+    /// unopposed. That is the one pinch shape that always worked, and testing
+    /// only that shape is how zoom shipped dead.
+    ///
+    /// Anchoring the thumb splits the movement in half: the separation grows by
+    /// the full distance and the centroid moves by half of it. So the decision
+    /// only comes out as a zoom if the spread is measured as the real distance
+    /// between the fingers, not as the mean distance from the centroid, which
+    /// is exactly half of it and ties with the centroid's own travel.
+    func testAPinchWithOneFingerAnchoredStillZooms() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, [(1, 0, 0), (2, 100, 0)], at: 100))
+        let sent = interpreter.handle(event(.moved, [(1, 0, 0), (2, 160, 0)], at: 100.02))
+
+        XCTAssertTrue(
+            sent.contains { if case .modifierState = $0 { return true }; return false },
+            "an anchored pinch was read as a scroll, so zoom never fires on a real hand"
+        )
+    }
+
+    /// The same shape pinching inward, which is the half people actually use
+    /// to zoom back out of a photo.
+    func testAnAnchoredPinchInwardStillZooms() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, [(1, 0, 0), (2, 200, 0)], at: 100))
+        let sent = interpreter.handle(event(.moved, [(1, 0, 0), (2, 140, 0)], at: 100.02))
+
+        XCTAssertTrue(
+            sent.contains { if case .modifierState = $0 { return true }; return false },
+            "an anchored pinch inward was read as a scroll"
+        )
+    }
+
+    /// The guard on the fix. Making the spread twice as sensitive must not make
+    /// an ordinary two finger scroll start zooming, because a scroll always
+    /// changes the spread a little as the hand rolls.
+    func testASlightlyUnevenScrollIsStillAScroll() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, [(1, 0, 0), (2, 100, 0)], at: 100))
+        // Both fingers down the glass by 40, one of them drifting 6 points
+        // wider, which is the ordinary sloppiness of a real two finger scroll.
+        let sent = interpreter.handle(event(.moved, [(1, 0, 40), (2, 106, 40)], at: 100.02))
+
+        XCTAssertFalse(
+            sent.contains { if case .modifierState = $0 { return true }; return false },
+            "a sloppy scroll was read as a pinch"
+        )
+    }
+
     /// A gesture commits to one meaning and keeps it. Deciding afresh every
     /// frame makes a slow diagonal pinch flicker between zooming and scrolling,
     /// which is unusable and looks like a fault on the Mac.

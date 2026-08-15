@@ -254,7 +254,70 @@ final class TouchInterpreter {
     /// The view layer drives `stepMomentum` while this is true.
     var hasMomentum: Bool { momentum != nil }
 
+    /// What the interpreter currently believes the fingers are doing.
+    ///
+    /// This exists because a gesture that does nothing is completely silent.
+    /// The iPad shows no feedback of its own and the result appears on another
+    /// screen, so "the app never saw three fingers", "the system took the
+    /// touches away" and "the Mac ignored the keystroke" are three different
+    /// faults that look identical from the chair. Two of them are now readable
+    /// on the trackpad itself.
+    enum Activity: Equatable, Sendable {
+        case idle
+        case pointer
+        /// Two fingers down, not yet moved far enough to mean anything.
+        case deciding
+        case scroll
+        case zoom
+        /// Three or more fingers. `fired` goes true when the swipe is sent.
+        case multi(fingers: Int, fired: Bool)
+        /// The system took the touches away mid-gesture. Sticky until the next
+        /// touch, because this is the one outcome worth reading after the fact:
+        /// it means the gesture was seen and then confiscated, which is a
+        /// different problem from never having been seen.
+        case cancelled
+
+        var label: String {
+            switch self {
+            case .idle: return ""
+            case .pointer: return "move"
+            case .deciding: return "two fingers"
+            case .scroll: return "scroll"
+            case .zoom: return "zoom"
+            case let .multi(fingers, fired):
+                return fired ? "\(fingers)-finger swipe sent" : "\(fingers) fingers"
+            case .cancelled: return "cancelled by iPadOS"
+            }
+        }
+    }
+
+    private(set) var activity: Activity = .idle
+
     init() {}
+
+    /// Recomputed after every event rather than assigned at each of the dozen
+    /// places `gesture` changes, so it cannot drift out of step with the state
+    /// it describes.
+    private func refreshActivity(cancelled: Bool) {
+        if cancelled {
+            activity = .cancelled
+            return
+        }
+        switch gesture {
+        case .none:
+            activity = .idle
+        case .pointer:
+            activity = .pointer
+        case let .twoFinger(two):
+            switch two.mode {
+            case .undecided: activity = .deciding
+            case .scroll: activity = .scroll
+            case .zoom: activity = .zoom
+            }
+        case let .multi(multi):
+            activity = .multi(fingers: multi.fingerCount, fired: multi.fired)
+        }
+    }
 
     /// Turns one touch event into the messages to send, in order.
     func handle(_ event: TouchEvent) -> [ClientMessage] {
@@ -264,7 +327,9 @@ final class TouchInterpreter {
         momentum = nil
 
         if event.phase == .cancelled {
-            return cancel(remaining: event.active, at: event.timestamp)
+            let messages = cancel(remaining: event.active, at: event.timestamp)
+            refreshActivity(cancelled: true)
+            return messages
         }
 
         // Driven by which fingers are down rather than by the phase, so an
@@ -273,7 +338,9 @@ final class TouchInterpreter {
         // from a clean lift.
         let ids = Set(event.active.map(\.id))
         guard ids != activeIDs else {
-            return moved(event.active, at: event.timestamp)
+            let messages = moved(event.active, at: event.timestamp)
+            refreshActivity(cancelled: false)
+            return messages
         }
 
         let wasAtRest = isAtRest
@@ -284,6 +351,7 @@ final class TouchInterpreter {
         )
         messages += beginGesture(event.active, at: event.timestamp, mayTapOrChain: wasAtRest)
         activeIDs = ids
+        refreshActivity(cancelled: false)
         return messages
     }
 
@@ -308,6 +376,7 @@ final class TouchInterpreter {
         pendingScrollX = 0
         pendingScrollY = 0
         momentum = nil
+        activity = .idle
         return messages
     }
 
@@ -652,7 +721,12 @@ final class TouchInterpreter {
                 // sign carries straight across. Scaled down because Command
                 // scroll steps a zoom level far faster than a scroll moves a
                 // page, and one to one makes a small pinch jump three levels.
-                return messages + scrollMessages(dx: 0, dy: dSpread * 0.25)
+                //
+                // An eighth rather than a quarter only because `spread` now
+                // reports the real distance between the fingers instead of half
+                // of it. The product is unchanged, so a pinch of a given size
+                // zooms by exactly as much as it did before.
+                return messages + scrollMessages(dx: 0, dy: dSpread * 0.125)
             }
 
         case .multi(var multi):
@@ -786,19 +860,33 @@ final class TouchInterpreter {
         return Int16(value)
     }
 
-    /// How far apart the fingers are: the mean distance from the centroid.
+    /// How far apart the fingers are: for two fingers, the distance between
+    /// them.
     ///
-    /// Not the distance between two named fingers, even though a pinch is
-    /// almost always two. The mean has no ordering to get wrong, so it cannot
-    /// change sign when UIKit reports the same two touches in the other order,
-    /// which it is free to do because `active` comes from a `Set`.
+    /// Computed as twice the mean distance from the centroid rather than as the
+    /// distance between two named fingers. The mean has no ordering to get
+    /// wrong, so it cannot change sign when UIKit reports the same two touches
+    /// in the other order, which it is free to do because `active` comes from a
+    /// `Set`. For two fingers the two definitions are identical, because each
+    /// finger is exactly half the separation away from the point between them.
+    ///
+    /// **The doubling is the whole fix for pinch to zoom, and it is not
+    /// cosmetic.** Without it this returned half the real separation while
+    /// `maxTravel` returned the centroid's full movement, and `decide` compares
+    /// the two directly. Anchor a thumb and move one finger by D, which is how
+    /// people actually pinch: the separation grows by D so the old measure grew
+    /// by D/2, and the centroid moves by D/2 as well. The two came out exactly
+    /// equal, ties go to scrolling, and a pinch could only ever zoom if both
+    /// fingers moved by the same amount and held the centroid perfectly still.
+    /// Every zoom test here did exactly that, which is why the bug survived a
+    /// full suite and was found by a hand on an iPad.
     private static func spread(of samples: [TouchSample]) -> Double {
         guard samples.count > 1 else { return 0 }
         let middle = centroid(of: samples)
         let total = samples.reduce(Double(0)) {
             $0 + Double(hypot($1.location.x - middle.x, $1.location.y - middle.y))
         }
-        return total / Double(samples.count)
+        return 2 * total / Double(samples.count)
     }
 
     private static func centroid(of samples: [TouchSample]) -> CGPoint {

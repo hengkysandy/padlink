@@ -68,16 +68,28 @@ final class MacInputSynthesizer: InputSynthesizing {
         event?.post(tap: .cghidEventTap)
     }
 
-    func scroll(deltaX: Int32, deltaY: Int32) {
+    func scroll(deltaX: Int32, deltaY: Int32, modifiers: KeyModifiers) {
         // Pixel units give smooth scrolling rather than notched jumps.
-        CGEvent(
+        guard let event = CGEvent(
             scrollWheelEvent2Source: nil,
             units: .pixel,
             wheelCount: 2,
             wheel1: deltaY,
             wheel2: deltaX,
             wheel3: 0
-        )?.post(tap: .cghidEventTap)
+        ) else { return }
+        // Set on the scroll itself, and not left to whatever the modifier key
+        // events posted a moment ago happened to leave in the global state.
+        //
+        // This is the Mac half of pinch to zoom. macOS decides that a scroll is
+        // a zoom by reading the Command flag on the scroll event, so a Command
+        // that is genuinely held down but absent from these flags produces an
+        // ordinary scroll. A freshly created `CGEvent` inherits flags from the
+        // combined session state, which does usually include a synthetic
+        // modifier, but "usually" is not a contract and it silently stops being
+        // true when a real key is held at the same time.
+        event.flags = Self.cgFlags(from: modifiers)
+        event.post(tap: .cghidEventTap)
     }
 
     func insertText(_ text: String) {

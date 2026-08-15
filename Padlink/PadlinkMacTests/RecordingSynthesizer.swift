@@ -9,7 +9,7 @@ final class RecordingSynthesizer: InputSynthesizing {
     enum Call: Equatable {
         case move(to: CGPoint, dragging: PointerButton?)
         case button(PointerButton, isDown: Bool, at: CGPoint, clickCount: Int)
-        case scroll(deltaX: Int32, deltaY: Int32)
+        case scroll(deltaX: Int32, deltaY: Int32, modifiers: KeyModifiers)
         case insertText(String)
         case key(virtualCode: UInt16, isDown: Bool, modifiers: KeyModifiers)
         case modifierKey(KeyModifiers, isDown: Bool)
@@ -29,8 +29,8 @@ final class RecordingSynthesizer: InputSynthesizing {
         calls.append(.button(button, isDown: isDown, at: point, clickCount: clickCount))
     }
 
-    func scroll(deltaX: Int32, deltaY: Int32) {
-        calls.append(.scroll(deltaX: deltaX, deltaY: deltaY))
+    func scroll(deltaX: Int32, deltaY: Int32, modifiers: KeyModifiers) {
+        calls.append(.scroll(deltaX: deltaX, deltaY: deltaY, modifiers: modifiers))
     }
 
     func insertText(_ text: String) {

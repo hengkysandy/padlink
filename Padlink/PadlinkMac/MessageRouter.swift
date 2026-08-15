@@ -48,7 +48,13 @@ final class MessageRouter {
             handleButton(button, isDown: isDown)
 
         case let .scroll(dx, dy):
-            synthesizer.scroll(deltaX: Int32(dx), deltaY: Int32(dy))
+            // Carrying the held modifiers, because a zoom is Command plus a
+            // scroll and macOS reads that Command off the scroll event itself.
+            synthesizer.scroll(
+                deltaX: Int32(dx),
+                deltaY: Int32(dy),
+                modifiers: held.heldModifiers
+            )
 
         case let .keyText(text):
             synthesizer.insertText(text)

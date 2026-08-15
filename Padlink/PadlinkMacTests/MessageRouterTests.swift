@@ -61,7 +61,34 @@ final class MessageRouterTests: XCTestCase {
 
     func testScrollIsForwarded() {
         router.handle(.scroll(dx: 3, dy: -120))
-        XCTAssertEqual(synthesizer.calls, [.scroll(deltaX: 3, deltaY: -120)])
+        XCTAssertEqual(synthesizer.calls, [.scroll(deltaX: 3, deltaY: -120, modifiers: [])])
+    }
+
+    /// The Mac half of pinch to zoom.
+    ///
+    /// A zoom is Command held across a scroll, and "held" is not enough on its
+    /// own. macOS decides whether a scroll zooms by reading the modifier flags
+    /// **on the scroll event itself**, so a Command posted as a separate key
+    /// event leaves the scroll that follows it flagless and ordinary. The iPad
+    /// can get the whole gesture right and the Mac will still just scroll.
+    func testAScrollCarriesTheModifiersTheMacIsHolding() {
+        router.handle(.modifierState(modifiers: [.command]))
+        router.handle(.scroll(dx: 0, dy: 12))
+
+        XCTAssertEqual(
+            synthesizer.calls.last,
+            .scroll(deltaX: 0, deltaY: 12, modifiers: [.command]),
+            "a scroll during a zoom reached macOS with no Command flag on it"
+        )
+    }
+
+    /// And gives them back, so the scroll after a pinch is a plain scroll.
+    func testAScrollAfterTheModifiersAreReleasedCarriesNone() {
+        router.handle(.modifierState(modifiers: [.command]))
+        router.handle(.modifierState(modifiers: []))
+        router.handle(.scroll(dx: 0, dy: 12))
+
+        XCTAssertEqual(synthesizer.calls.last, .scroll(deltaX: 0, deltaY: 12, modifiers: []))
     }
 
     func testModifierStatePostsOnlyWhatChanged() {

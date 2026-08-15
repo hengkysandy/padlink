@@ -35,6 +35,15 @@ struct TrackpadScreen: View {
     /// two. This turns that from a mystery into something visible.
     @State private var fingerCount = 0
 
+    /// What the trackpad made of those fingers.
+    ///
+    /// Shown beside the count because the count alone cannot tell the two
+    /// failures apart. Three fingers that never arrive read as "2". Three that
+    /// arrive and are then taken away by iPadOS read as "cancelled by iPadOS".
+    /// Both look like nothing happening from the chair, and they need opposite
+    /// fixes.
+    @State private var activity = TouchInterpreter.Activity.idle
+
     /// Remembered across launches. Choosing a keyboard is a preference about
     /// the hardware in front of the user, not about this session, and having to
     /// set it again every launch is what makes a setting feel broken.
@@ -196,7 +205,10 @@ struct TrackpadScreen: View {
         TrackpadView(
             send: { message in service.send(message) },
             lockedModifiers: lockedModifiers,
-            onFingerCountChanged: { fingerCount = $0 }
+            onGestureChanged: { count, activity in
+                fingerCount = count
+                self.activity = activity
+            }
         )
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .overlay(
@@ -220,17 +232,26 @@ struct TrackpadScreen: View {
     /// `allowsHitTesting(false)` on both, so neither can swallow the first touch
     /// of a drag.
     @ViewBuilder private var trackpadOverlay: some View {
-        if fingerCount > 1 {
-            // The number, large. A gesture that does nothing gives no clue
-            // whether the fingers were seen: a hand straying over the edge of
-            // the surface has touches filtered out, and three fingers arrive as
-            // two with nothing to say so. This is that missing signal, and it
-            // costs nothing when one finger is down.
-            Text("\(fingerCount)")
-                .font(.system(size: 64, weight: .light, design: .rounded))
-                .foregroundStyle(.tertiary)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+        if fingerCount > 1 || activity == .cancelled {
+            // The number, large, and under it what the trackpad made of it.
+            //
+            // A gesture that does nothing gives no clue where it went wrong,
+            // and there are three quite different places. The fingers may never
+            // have arrived, because a hand straying over the edge of the
+            // surface has those touches filtered out and three fingers become
+            // two. iPadOS may have taken them away mid-gesture. Or everything
+            // may have worked and the Mac ignored the keystroke. The first two
+            // are readable here; only the third is left to guess at.
+            VStack(spacing: 2) {
+                Text("\(fingerCount)")
+                    .font(.system(size: 64, weight: .light, design: .rounded))
+                Text(activity.label)
+                    .font(.footnote)
+                    .foregroundStyle(activity == .cancelled ? Color.orange : .secondary)
+            }
+            .foregroundStyle(.tertiary)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         } else {
             // A grey rectangle with nothing in it does not say "drag here", and
             // this rectangle is most of the app.

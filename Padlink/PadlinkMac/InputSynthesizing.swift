@@ -13,7 +13,9 @@ protocol InputSynthesizing: AnyObject {
     var currentCursorLocation: CGPoint { get }
     func moveCursor(to point: CGPoint, draggingButton: PointerButton?)
     func setButton(_ button: PointerButton, isDown: Bool, at point: CGPoint, clickCount: Int)
-    func scroll(deltaX: Int32, deltaY: Int32)
+    /// `modifiers` go on the scroll event itself, not around it. macOS reads
+    /// the flags carried by the scroll to decide whether it zooms.
+    func scroll(deltaX: Int32, deltaY: Int32, modifiers: KeyModifiers)
     func insertText(_ text: String)
     func postKey(virtualCode: UInt16, isDown: Bool, modifiers: KeyModifiers)
     func postModifierKey(_ modifier: KeyModifiers, isDown: Bool)
