@@ -79,16 +79,40 @@ Mission Control for both three fingers and four, and down is not used.
 Five fingers is still treated as four. A hand resting while three fingers swipe
 is common, and ignoring it entirely reads as the gesture being broken.
 
-## What zoom actually needs
+## Pinch to zoom is a real gesture now
 
-The Command flag does reach the Mac on a scroll event, which was confirmed with
-an event tap reading back what macOS delivered. So a pinch is being sent
-correctly.
+Zoom used to be Command held across a scroll. That is what a mouse wheel user
+does, and it is not what a trackpad does. Tested: it zooms Chrome, and does
+nothing at all in Preview, Photos, Maps or Xcode, which all want a real gesture.
+The Command flag was arriving correctly, confirmed with an event tap. The
+technique was simply the wrong one.
 
-It will zoom in **Safari, Chrome and Finder**, which all read Command and scroll.
-It will **not** zoom in Preview, which wants a real `NSEvent.magnify`, and macOS
-has no public API to synthesize one. If a pinch seems to do nothing, try it in
-Safari before assuming it is broken.
+**A real pinch can be synthesized, so it is.** macOS carries gestures as event
+type 29 with undocumented fields, and posting one zoomed Preview immediately.
+
+**These are private constants and that is a deliberate trade.** There is no
+public API for a magnify event, and the only supported alternative is the one
+that does not work in half the apps people zoom in. The risk is that a future
+macOS changes the numbers and pinching quietly stops. It is confined to one
+method in `MacInputSynthesizer`, everything else keeps working, and the way back
+is to return to Command and scroll.
+
+Two consequences worth knowing:
+
+- **A pinch is phased.** The iPad sends began, then a step per frame, then
+  ended, because some apps only act on a gesture they saw begin. The Mac closes
+  an open pinch if the connection drops, for the same reason it releases a held
+  mouse button: an app told a pinch began and never told it ended waits forever
+  for fingers that have gone.
+- **A step is relative to how far apart the fingers already are.** Moving them
+  20 points apart means much more when they start 40 points apart than when they
+  start 300, and a real trackpad behaves the same way. An absolute scale makes a
+  pinch that starts wide feel dead and one that starts narrow feel wild.
+
+The change since the fingers landed is **thrown away** when the pinch is
+recognised, unlike a scroll, which banks it. It is at least the decision
+threshold, and sending it as the first step would jump several zoom levels the
+instant the gesture was understood.
 
 ## Why scroll and zoom have a small dead zone
 

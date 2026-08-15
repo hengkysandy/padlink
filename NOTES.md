@@ -959,3 +959,51 @@ What still should work, and was probably tested in the wrong app:
 - Preview was opened and closed again.
 - The mouse cursor was moved.
 - `/tmp/padlink-probe.txt` was created and deleted.
+
+## 2026-08-15 — Pinch to zoom: not dropped, made real
+
+User: three finger swipe up works now, what about pinch, do we drop it?
+
+Answer: no. Command and scroll was simply the wrong technique, and a real pinch
+can be synthesized.
+
+### The evidence
+
+| Tried in Preview | Result |
+|---|---|
+| Command held, pixel unit scrolls | nothing |
+| Command held, line unit scrolls | nothing |
+| Event tap reading the scroll back | `flags=[command]`, so the flag was arriving |
+| **Gesture event, type 29** | **zoomed about 3x, immediately** |
+
+Also tried Command and scroll on a real page in Safari: the page **scrolled**,
+it did not zoom. So the old approach worked in Chrome and essentially nowhere
+else that matters.
+
+### What changed
+
+- New `ClientMessage.pinch(phase:magnification:)`, wire type 10. Magnification in
+  thousandths, because the protocol is integers.
+- `PinchPhase` is explicit (began, changed, ended) rather than inferred on the
+  Mac. Inferring would need a timer, which either ends the gesture during a slow
+  pinch or leaves it open after the fingers have gone. The iPad knows exactly.
+- `MacInputSynthesizer.pinch` posts CGEvent type 29 with fields 110 (gesture
+  type), 113 (value) and 132 (phase). **Private constants.** Confined to one
+  method; the way back is Command and scroll.
+- `MessageRouter` tracks `pinchIsOpen` and closes it in `releaseEverything`, the
+  same treatment a held mouse button gets.
+- The iPad no longer holds Command for a zoom at all, so `baseModifiers` no
+  longer needs restoring after a pinch. A whole class of interference with the
+  on screen keyboard's locked modifiers is gone rather than handled.
+- A pinch step is **relative** to the current separation, matching a real
+  trackpad. The change banked before the gesture was recognised is thrown away,
+  not flushed, or the first step would jump several zoom levels.
+
+Suites: **Core 125, Mac 113, iPad 379.**
+
+### Process note worth remembering
+
+A bulk edit that replaced a range between two string markers silently deleted
+**14 unrelated tests** that happened to sit between them. Caught only because the
+iPad count fell from 377 to 365 and the number was checked rather than glanced
+at. Restored from `git show HEAD:`. Watch index-to-index slicing on source files.

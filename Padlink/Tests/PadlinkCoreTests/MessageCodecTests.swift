@@ -15,6 +15,8 @@ private let allClientMessages: [ClientMessage] = [
     .keyCode(key: .f12, isDown: false, modifiers: [.shift, .control, .option, .command, .function]),
     .modifierState(modifiers: [.command, .function]),
     .systemAction(.missionControl),
+    .pinch(phase: .began, magnification: 0),
+    .pinch(phase: .changed, magnification: -32_000),
     .ping(seq: 4_000_000_000)
 ]
 
@@ -53,6 +55,18 @@ func serverMessagesRoundTrip(message: ServerMessage) throws {
 @Test func modifierStateUsesTypeByte8() throws {
     let encoded = try ClientMessageCodec.encode(.modifierState(modifiers: [.command]))
     #expect(encoded.first == 8)
+}
+
+@Test(arguments: PinchPhase.allCases)
+func everyPinchPhaseRoundTrips(phase: PinchPhase) throws {
+    let message = ClientMessage.pinch(phase: phase, magnification: 250)
+    #expect(try ClientMessageCodec.decode(try ClientMessageCodec.encode(message)) == message)
+}
+
+@Test func anUnknownPinchPhaseIsRejected() throws {
+    #expect(throws: CodecError.unknownPinchPhase(99)) {
+        try ClientMessageCodec.decode(Data([10, 99, 0, 0]))
+    }
 }
 
 @Test func systemActionUsesTypeByte9() throws {

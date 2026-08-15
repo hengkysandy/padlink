@@ -257,9 +257,13 @@ final class TouchInterpreter {
     /// from truncation exactly as much as a slow drag does.
     private var pendingScrollX: Double = 0
     private var pendingScrollY: Double = 0
-    /// True while a zoom is holding Command on the Mac. Read by every exit,
-    /// because this is the one piece of state here that can outlive the app.
-    private var zoomHoldsCommand = false
+    /// The same idea for a pinch. See `pinchMessages`.
+    private var pendingMagnification: Double = 0
+    /// True while a pinch has begun on the Mac and not yet ended. Read by every
+    /// exit, because this is the one piece of state here that can outlive the
+    /// app: an app told a pinch began and never told it ended goes on believing
+    /// the fingers are still there.
+    private var pinchIsOpen = false
     private var momentum: Momentum?
 
     /// Modifiers the Mac is holding for somebody else, normally the on screen
@@ -400,13 +404,14 @@ final class TouchInterpreter {
             messages.append(.pointerButton(button: .left, isDown: false))
             buttonIsDown = false
         }
-        messages += releaseZoomModifier()
+        messages += endPinch()
         throttle.end()
         gesture = .none
         activeIDs = []
         lastTapEndedAt = nil
         pendingScrollX = 0
         pendingScrollY = 0
+        pendingMagnification = 0
         momentum = nil
         activity = .idle
         fingersOnlyAdded = true
@@ -542,9 +547,10 @@ final class TouchInterpreter {
                 messages += startMomentum(from: two, at: timestamp)
             }
 
-            messages += releaseZoomModifier()
+            messages += endPinch()
             pendingScrollX = 0
             pendingScrollY = 0
+            pendingMagnification = 0
             // A right click does not open the drag window. Chaining a left
             // button drag onto a right click is not a gesture anyone makes, and
             // leaving it open would make the next touch silently hold the
@@ -575,16 +581,16 @@ final class TouchInterpreter {
         return []
     }
 
-    /// Gives Command back if a zoom was holding it, and nothing otherwise.
+    /// Closes a pinch if one is open, and sends nothing otherwise.
     ///
-    /// `modifierState` is absolute, so this restores `baseModifiers` rather
-    /// than sending an empty set. Sending empty would release a Command the
-    /// user had locked on the on screen keyboard, which would keep showing it
-    /// as locked while the Mac had let it go.
-    private func releaseZoomModifier() -> [ClientMessage] {
-        guard zoomHoldsCommand else { return [] }
-        zoomHoldsCommand = false
-        return [.modifierState(modifiers: baseModifiers)]
+    /// Every exit calls this: a clean lift, a cancellation, and the app going
+    /// away with the fingers still down. A gesture that began and never ended
+    /// leaves the app on the Mac waiting for fingers that have gone, and there
+    /// is nothing on the iPad to explain it.
+    private func endPinch() -> [ClientMessage] {
+        guard pinchIsOpen else { return [] }
+        pinchIsOpen = false
+        return [.pinch(phase: .ended, magnification: 0)]
     }
 
     /// Starts whatever gesture the fingers now on the glass describe, always
@@ -722,14 +728,23 @@ final class TouchInterpreter {
                     return []
 
                 case .zoom:
-                    // The opposite choice, on purpose. A zoom is relative, so
-                    // there is no drift to correct, and flushing the spread
-                    // change that accumulated while deciding would jump three
-                    // zoom levels the instant the pinch was recognised.
+                    // The opposite choice from scrolling, on purpose. A zoom is
+                    // relative, so there is no drift to correct, and the spread
+                    // change banked while the gesture was still deciding is
+                    // thrown away rather than flushed. `dSpread` on this event
+                    // is the whole change since the fingers landed, which is at
+                    // least `twoFingerDecision` and would jump several zoom
+                    // levels the instant the pinch was recognised.
+                    //
+                    // So this event opens the gesture and stops. The next one is
+                    // the first real step.
                     pendingScrollX = 0
                     pendingScrollY = 0
-                    zoomHoldsCommand = true
-                    messages.append(.modifierState(modifiers: baseModifiers.union(.command)))
+                    pendingMagnification = 0
+                    pinchIsOpen = true
+                    two.lastMovedAt = timestamp
+                    gesture = .twoFinger(two)
+                    return [.pinch(phase: .began, magnification: 0)]
 
                 case .scroll:
                     break
@@ -758,17 +773,19 @@ final class TouchInterpreter {
             case .zoom:
                 two.lastMovedAt = timestamp
                 gesture = .twoFinger(two)
-                // Fingers spreading apart zoom in. Positive `dy` is a scroll
-                // up, and Command plus scroll up is zoom in on the Mac, so the
-                // sign carries straight across. Scaled down because Command
-                // scroll steps a zoom level far faster than a scroll moves a
-                // page, and one to one makes a small pinch jump three levels.
+                // Fingers spreading apart zoom in, so the sign carries straight
+                // across from the change in separation.
                 //
-                // An eighth rather than a quarter only because `spread` now
-                // reports the real distance between the fingers instead of half
-                // of it. The product is unchanged, so a pinch of a given size
-                // zooms by exactly as much as it did before.
-                return messages + scrollMessages(dx: 0, dy: dSpread * 0.125)
+                // Relative to the current separation, not absolute. Moving the
+                // fingers 20 points apart means much more when they are 40
+                // points apart than when they are 300, and a real trackpad
+                // behaves the same way. An absolute scale makes a pinch that
+                // starts wide feel dead and one that starts narrow feel wild.
+                //
+                // The guard matters: `two.spread` is the separation *after*
+                // this event, and two fingers touching would divide by zero.
+                let base = max(two.spread, 1)
+                return messages + pinchMessages(magnification: dSpread / base)
             }
 
         case .multi(var multi):
@@ -910,6 +927,23 @@ final class TouchInterpreter {
         pendingScrollY -= wholeY
 
         return [.scroll(dx: Self.clampedToInt16(wholeX), dy: Self.clampedToInt16(wholeY))]
+    }
+
+    /// Turns a fractional zoom step into a message, with the same sub-pixel
+    /// accumulator problem `scrollMessages` has and the same answer.
+    ///
+    /// One pinch event is a small fraction of the current size, and the wire
+    /// carries thousandths as an integer. Truncating each one to zero would
+    /// make a slow pinch do nothing at all, so the remainder is carried.
+    private func pinchMessages(magnification: Double) -> [ClientMessage] {
+        guard magnification.isFinite else { return [] }
+
+        pendingMagnification += magnification * 1000
+        let whole = pendingMagnification.rounded(.towardZero)
+        guard whole != 0 else { return [] }
+        pendingMagnification -= whole
+
+        return [.pinch(phase: .changed, magnification: Self.clampedToInt16(whole))]
     }
 
     /// Bounds the value before converting, never after. `Int16(value)` on

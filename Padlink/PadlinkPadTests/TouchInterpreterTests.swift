@@ -593,72 +593,123 @@ final class TouchInterpreterTests: XCTestCase {
         _ = interpreter.handle(event(.began, [(1, 0, 0), (2, 100, 0)], at: 100))
         let sent = interpreter.handle(event(.moved, [(1, -40, 0), (2, 140, 0)], at: 100.02))
 
-        XCTAssertEqual(sent.first, .modifierState(modifiers: .command))
-        // Second event, so the pre-decision spread change is not replayed and
-        // this is a pure step.
+        // Opening the gesture and nothing else. The change since the fingers
+        // landed is at least the decision threshold, and sending it as a step
+        // would jump several zoom levels the moment the pinch was recognised.
+        XCTAssertEqual(sent, [.pinch(phase: .began, magnification: 0)])
+
+        // The next event is the first real step. Separation goes 180 to 220, so
+        // it is 40/220, which is 181 thousandths.
         let more = interpreter.handle(event(.moved, [(1, -60, 0), (2, 160, 0)], at: 100.04))
-        XCTAssertEqual(more, [.scroll(dx: 0, dy: 5)])
+        XCTAssertEqual(more, [.pinch(phase: .changed, magnification: 181)])
     }
 
+    /// Zooming out is a negative magnification, not a separate message.
     func testFingersComingTogetherZoomOut() {
         let interpreter = TouchInterpreter()
         _ = interpreter.handle(event(.began, [(1, 0, 0), (2, 200, 0)], at: 100))
         _ = interpreter.handle(event(.moved, [(1, 40, 0), (2, 160, 0)], at: 100.02))
-        XCTAssertEqual(
-            interpreter.handle(event(.moved, [(1, 60, 0), (2, 140, 0)], at: 100.04)),
-            [.scroll(dx: 0, dy: -5)]
-        )
+
+        let sent = interpreter.handle(event(.moved, [(1, 60, 0), (2, 140, 0)], at: 100.04))
+        guard case let .pinch(phase, magnification) = sent.first else {
+            return XCTFail("expected a pinch, got \(sent)")
+        }
+        XCTAssertEqual(phase, .changed)
+        XCTAssertLessThan(magnification, 0, "closing the fingers must zoom out")
+    }
+
+    /// The same finger movement means more when the fingers are close together
+    /// than when they are far apart, exactly as on a real trackpad. An absolute
+    /// scale makes a pinch that starts wide feel dead and one that starts narrow
+    /// feel wild.
+    func testAPinchIsRelativeToHowFarApartTheFingersAlreadyAre() {
+        func step(startingAt separation: Double) -> Int16 {
+            let interpreter = TouchInterpreter()
+            _ = interpreter.handle(event(.began, [(1, 0, 0), (2, separation, 0)], at: 100))
+            _ = interpreter.handle(event(
+                .moved, [(1, -20, 0), (2, separation + 20, 0)], at: 100.02
+            ))
+            let sent = interpreter.handle(event(
+                .moved, [(1, -40, 0), (2, separation + 40, 0)], at: 100.04
+            ))
+            guard case let .pinch(_, magnification) = sent.first else { return 0 }
+            return magnification
+        }
+
+        XCTAssertGreaterThan(step(startingAt: 100), step(startingAt: 400))
+    }
+
+    /// A slow pinch must not be truncated into doing nothing. Each step is a
+    /// small fraction, and rounding every one toward zero on its own would
+    /// throw all of them away.
+    func testASlowPinchAccumulatesInsteadOfVanishing() {
+        let interpreter = TouchInterpreter()
+        _ = interpreter.handle(event(.began, [(1, 0, 0), (2, 600, 0)], at: 100))
+        _ = interpreter.handle(event(.moved, [(1, -10, 0), (2, 610, 0)], at: 100.02))
+
+        var total = 0
+        for index in 1...12 {
+            let offset = Double(index) * 0.4
+            let sent = interpreter.handle(event(
+                .moved, [(1, -10 - offset, 0), (2, 610 + offset, 0)], at: 100.02 + 0.02 * Double(index)
+            ))
+            for message in sent {
+                if case let .pinch(_, magnification) = message { total += Int(magnification) }
+            }
+        }
+        XCTAssertGreaterThan(total, 0, "a slow pinch was rounded away to nothing")
     }
 
     /// The single most dangerous thing in this file. Command left held on the
     /// Mac makes every later keystroke a shortcut, and the iPad has nothing on
     /// screen to say so.
-    func testAZoomReleasesCommandWhenTheFingersLift() {
+    func testAZoomEndsTheGestureWhenTheFingersLift() {
         let interpreter = TouchInterpreter()
         _ = interpreter.handle(event(.began, [(1, 0, 0), (2, 100, 0)], at: 100))
         _ = interpreter.handle(event(.moved, [(1, -40, 0), (2, 140, 0)], at: 100.02))
         XCTAssertEqual(
             interpreter.handle(event(.ended, [], at: 100.1)).last,
-            .modifierState(modifiers: [])
+            .pinch(phase: .ended, magnification: 0)
         )
     }
 
     /// The same, by the route that exists because the tidy one is not enough.
-    func testACancelledZoomReleasesCommand() {
+    func testACancelledZoomEndsTheGesture() {
         let interpreter = TouchInterpreter()
         _ = interpreter.handle(event(.began, [(1, 0, 0), (2, 100, 0)], at: 100))
         _ = interpreter.handle(event(.moved, [(1, -40, 0), (2, 140, 0)], at: 100.02))
         XCTAssertTrue(
             interpreter.handle(event(.cancelled, [], at: 100.1))
-                .contains(.modifierState(modifiers: []))
+                .contains(.pinch(phase: .ended, magnification: 0))
         )
     }
 
     /// And by the route UIKit does not always report: the app going away with
     /// the fingers still down.
-    func testReleaseAllReleasesAZoomsCommand() {
+    func testReleaseAllEndsAnOpenZoom() {
         let interpreter = TouchInterpreter()
         _ = interpreter.handle(event(.began, [(1, 0, 0), (2, 100, 0)], at: 100))
         _ = interpreter.handle(event(.moved, [(1, -40, 0), (2, 140, 0)], at: 100.02))
-        XCTAssertEqual(interpreter.releaseAll(), [.modifierState(modifiers: [])])
+        XCTAssertEqual(interpreter.releaseAll(), [.pinch(phase: .ended, magnification: 0)])
     }
 
-    /// `modifierState` is absolute: it replaces the Mac's whole held set. If a
-    /// zoom ended by sending an empty set, it would also release a Command the
-    /// user had locked on the on screen keyboard, and the keyboard would go on
-    /// showing it as locked while the Mac had let it go.
-    func testAZoomRestoresTheKeyboardsLockedModifiersRatherThanClearingThem() {
+    /// A pinch holds no modifier at all any more, which is the point.
+    ///
+    /// It used to hold Command, and `modifierState` is absolute, so ending a
+    /// zoom had to restore whatever the on screen keyboard had locked or it
+    /// would silently release it. A real gesture carries no modifier, so that
+    /// whole class of interference is gone rather than handled.
+    func testAZoomDoesNotTouchTheKeyboardsLockedModifiers() {
         let interpreter = TouchInterpreter()
         interpreter.baseModifiers = .shift
         _ = interpreter.handle(event(.began, [(1, 0, 0), (2, 100, 0)], at: 100))
 
-        XCTAssertEqual(
-            interpreter.handle(event(.moved, [(1, -40, 0), (2, 140, 0)], at: 100.02)).first,
-            .modifierState(modifiers: [.shift, .command])
-        )
-        XCTAssertEqual(
-            interpreter.handle(event(.ended, [], at: 100.1)).last,
-            .modifierState(modifiers: .shift)
+        var sent = interpreter.handle(event(.moved, [(1, -40, 0), (2, 140, 0)], at: 100.02))
+        sent += interpreter.handle(event(.ended, [], at: 100.1))
+
+        XCTAssertFalse(
+            sent.contains { if case .modifierState = $0 { return true }; return false },
+            "a pinch changed the Mac's modifier state"
         )
     }
 
@@ -813,7 +864,7 @@ final class TouchInterpreterTests: XCTestCase {
         let sent = interpreter.handle(event(.moved, [(1, 0, 0), (2, 160, 0)], at: 100.02))
 
         XCTAssertTrue(
-            sent.contains { if case .modifierState = $0 { return true }; return false },
+            sent.contains { if case .pinch = $0 { return true }; return false },
             "an anchored pinch was read as a scroll, so zoom never fires on a real hand"
         )
     }
@@ -826,7 +877,7 @@ final class TouchInterpreterTests: XCTestCase {
         let sent = interpreter.handle(event(.moved, [(1, 0, 0), (2, 140, 0)], at: 100.02))
 
         XCTAssertTrue(
-            sent.contains { if case .modifierState = $0 { return true }; return false },
+            sent.contains { if case .pinch = $0 { return true }; return false },
             "an anchored pinch inward was read as a scroll"
         )
     }
@@ -842,7 +893,7 @@ final class TouchInterpreterTests: XCTestCase {
         let sent = interpreter.handle(event(.moved, [(1, 0, 40), (2, 106, 40)], at: 100.02))
 
         XCTAssertFalse(
-            sent.contains { if case .modifierState = $0 { return true }; return false },
+            sent.contains { if case .pinch = $0 { return true }; return false },
             "a sloppy scroll was read as a pinch"
         )
     }
@@ -856,9 +907,8 @@ final class TouchInterpreterTests: XCTestCase {
         _ = interpreter.handle(event(.moved, [(1, -40, 0), (2, 140, 0)], at: 100.02))
         // Now slide the whole pair sideways, which on its own is a clear scroll.
         let sent = interpreter.handle(event(.moved, [(1, 60, 0), (2, 240, 0)], at: 100.04))
-        // Still exactly one message, and the spread did not change, so it is
-        // the zoom's own zero step and not a horizontal scroll.
-        XCTAssertFalse(sent.contains { if case .scroll(let dx, _) = $0 { return dx != 0 }; return false })
+        // No scroll of any kind: a gesture that became a zoom stays a zoom.
+        XCTAssertFalse(sent.contains { if case .scroll = $0 { return true }; return false })
     }
 
     func testAGestureThatBecameAScrollNeverStartsZooming() {
@@ -867,7 +917,7 @@ final class TouchInterpreterTests: XCTestCase {
         _ = interpreter.handle(event(.moved, row(2, dy: 30), at: 100.02))
         // Now spread the fingers hard, which on its own is a clear pinch.
         let sent = interpreter.handle(event(.moved, [(1, -100, 30), (2, 200, 30)], at: 100.04))
-        XCTAssertFalse(sent.contains { if case .modifierState = $0 { return true }; return false })
+        XCTAssertFalse(sent.contains { if case .pinch = $0 { return true }; return false })
     }
 
     // MARK: - Three and four finger swipes

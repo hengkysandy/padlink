@@ -128,6 +128,54 @@ final class MacInputSynthesizer: InputSynthesizing {
         event.post(tap: .cghidEventTap)
     }
 
+    /// The undocumented gesture event, which is the only way to produce a real
+    /// pinch.
+    ///
+    /// **These are private constants and that is a deliberate, measured
+    /// choice.** There is no public API for synthesizing a magnify event, and
+    /// the supported alternative, Command held across a scroll, is what a mouse
+    /// wheel user does rather than what a trackpad does. It was tested: it
+    /// zooms Chrome, and does nothing at all in Preview, Photos, Maps or Xcode,
+    /// which all want a real gesture. The gesture event was tested the same way
+    /// and zoomed Preview immediately.
+    ///
+    /// The risk is that Apple changes these numbers in a future macOS and
+    /// pinching quietly stops working. Everything else in the app keeps
+    /// working, because this is confined to one method, and the fallback is to
+    /// go back to Command and scroll.
+    private enum Gesture {
+        /// `NSEventTypeMagnify`.
+        static let eventType = CGEventType(rawValue: 29)!
+        /// Which gesture this is.
+        static let typeField = CGEventField(rawValue: 110)!
+        /// How much, as a fraction of the current size.
+        static let valueField = CGEventField(rawValue: 113)!
+        /// Began, changed or ended.
+        static let phaseField = CGEventField(rawValue: 132)!
+        /// `kIOHIDEventTypeZoom`.
+        static let zoom: Int64 = 8
+    }
+
+    func pinch(phase: PinchPhase, magnification: Int16) {
+        guard let event = CGEvent(source: nil) else { return }
+        event.type = Gesture.eventType
+        event.setIntegerValueField(Gesture.typeField, value: Gesture.zoom)
+        // Thousandths on the wire, a fraction here.
+        event.setDoubleValueField(Gesture.valueField, value: Double(magnification) / 1000)
+        event.setIntegerValueField(Gesture.phaseField, value: Self.phaseValue(phase))
+        event.post(tap: .cghidEventTap)
+    }
+
+    /// The phase numbers macOS uses, which are a bitfield rather than a count:
+    /// 1 began, 2 changed, 4 ended.
+    private static func phaseValue(_ phase: PinchPhase) -> Int64 {
+        switch phase {
+        case .began: return 1
+        case .changed: return 2
+        case .ended: return 4
+        }
+    }
+
     func perform(_ action: SystemAction) {
         switch action {
         case .missionControl:

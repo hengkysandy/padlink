@@ -109,6 +109,52 @@ final class MessageRouterTests: XCTestCase {
         XCTAssertEqual(synthesizer.calls, [.systemAction(.missionControl)])
     }
 
+    // MARK: - Pinch
+
+    /// A pinch goes straight through as a real gesture.
+    ///
+    /// It used to be Command held across a scroll, which is what a mouse wheel
+    /// user does and not what a trackpad does. Measured on real hardware: that
+    /// zooms Chrome and does nothing in Preview, Photos, Maps or Xcode.
+    func testAPinchIsPassedThroughAsAGesture() {
+        router.handle(.pinch(phase: .began, magnification: 0))
+        router.handle(.pinch(phase: .changed, magnification: 120))
+        router.handle(.pinch(phase: .ended, magnification: 0))
+
+        XCTAssertEqual(synthesizer.calls, [
+            .pinch(phase: .began, magnification: 0),
+            .pinch(phase: .changed, magnification: 120),
+            .pinch(phase: .ended, magnification: 0)
+        ])
+    }
+
+    /// The stuck gesture case, which is the pinch equivalent of a stuck mouse
+    /// button. An app told a pinch began and never told it ended goes on
+    /// believing the fingers are still there.
+    func testAPinchLeftOpenByADroppedConnectionIsClosed() {
+        router.handle(.pinch(phase: .began, magnification: 0))
+        router.handle(.pinch(phase: .changed, magnification: 50))
+        let countBefore = synthesizer.calls.count
+
+        router.releaseEverything()
+
+        XCTAssertEqual(
+            Array(synthesizer.calls.dropFirst(countBefore)),
+            [.pinch(phase: .ended, magnification: 0)]
+        )
+    }
+
+    /// And the other branch, so the fix cannot be "always end a pinch".
+    func testAPinchThatAlreadyEndedIsNotEndedTwice() {
+        router.handle(.pinch(phase: .began, magnification: 0))
+        router.handle(.pinch(phase: .ended, magnification: 0))
+        let countBefore = synthesizer.calls.count
+
+        router.releaseEverything()
+
+        XCTAssertEqual(synthesizer.calls.count, countBefore)
+    }
+
     func testModifierStatePostsOnlyWhatChanged() {
         router.handle(.modifierState(modifiers: [.command]))
         XCTAssertEqual(synthesizer.calls, [.modifierKey(.command, isDown: true)])

@@ -21,4 +21,6 @@ protocol InputSynthesizing: AnyObject {
     func postModifierKey(_ modifier: KeyModifiers, isDown: Bool)
     /// Not input at all. See `SystemAction` for why this is a separate verb.
     func perform(_ action: SystemAction)
+    /// A real trackpad pinch. See `ClientMessage.pinch`.
+    func pinch(phase: PinchPhase, magnification: Int16)
 }

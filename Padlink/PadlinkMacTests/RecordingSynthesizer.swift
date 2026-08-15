@@ -14,6 +14,7 @@ final class RecordingSynthesizer: InputSynthesizing {
         case key(virtualCode: UInt16, isDown: Bool, modifiers: KeyModifiers)
         case modifierKey(KeyModifiers, isDown: Bool)
         case systemAction(SystemAction)
+        case pinch(phase: PinchPhase, magnification: Int16)
     }
 
     private(set) var calls: [Call] = []
@@ -48,5 +49,9 @@ final class RecordingSynthesizer: InputSynthesizing {
 
     func perform(_ action: SystemAction) {
         calls.append(.systemAction(action))
+    }
+
+    func pinch(phase: PinchPhase, magnification: Int16) {
+        calls.append(.pinch(phase: phase, magnification: magnification))
     }
 }

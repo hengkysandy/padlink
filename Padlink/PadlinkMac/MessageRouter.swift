@@ -15,6 +15,13 @@ final class MessageRouter {
 
     private(set) var held = HeldInputState()
 
+    /// Whether a pinch has begun and not yet ended.
+    ///
+    /// Tracked for the same reason a held button is. The gesture spans several
+    /// messages, so a connection dying in the middle leaves an app believing a
+    /// pinch is still in progress, with nothing left to finish it.
+    private var pinchIsOpen = false
+
     /// Double-click bookkeeping. macOS only recognises a double click when the
     /// event carries a click state above 1.
     private var lastClickTime: Date?
@@ -73,6 +80,14 @@ final class MessageRouter {
         case let .modifierState(modifiers):
             handleModifierState(modifiers)
 
+        case let .pinch(phase, magnification):
+            // Straight through, and nothing recorded. A pinch that is cut off
+            // by a dropped connection leaves the Mac showing a gesture that
+            // never ended, so `releaseEverything` closes it below.
+            if phase == .began { pinchIsOpen = true }
+            if phase == .ended { pinchIsOpen = false }
+            synthesizer.pinch(phase: phase, magnification: magnification)
+
         case let .systemAction(action):
             // Nothing recorded in `held`, because this holds nothing. It is a
             // single request that either happens or does not, with no matching
@@ -95,6 +110,11 @@ final class MessageRouter {
     /// flags from the original key down would mean storing per-key modifier
     /// state for an event whose flags change nothing.
     func releaseEverything() {
+        if pinchIsOpen {
+            pinchIsOpen = false
+            synthesizer.pinch(phase: .ended, magnification: 0)
+        }
+
         let point = synthesizer.currentCursorLocation
         for action in held.drainReleases() {
             switch action {

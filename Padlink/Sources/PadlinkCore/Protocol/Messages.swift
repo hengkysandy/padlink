@@ -23,6 +23,19 @@ public enum SystemAction: UInt8, Sendable, Hashable, CaseIterable {
     case missionControl = 1
 }
 
+/// Where a pinch is in its life.
+///
+/// macOS gestures are phased, and some apps only act on a gesture they saw
+/// begin. Inferring the phases on the Mac would need a timer to decide a pinch
+/// had stopped, and a timer would either end the gesture during a slow pinch or
+/// leave it open after the fingers had gone. The iPad knows exactly when the
+/// fingers land and lift, so it says so.
+public enum PinchPhase: UInt8, Sendable, Hashable, CaseIterable {
+    case began = 1
+    case changed = 2
+    case ended = 3
+}
+
 /// Sent by the iPad.
 public enum ClientMessage: Sendable, Equatable {
     case hello(protocolVersion: UInt16, deviceName: String)
@@ -45,6 +58,18 @@ public enum ClientMessage: Sendable, Equatable {
     /// Ask the Mac to do something itself, rather than describing the input for
     /// it. See `SystemAction`.
     case systemAction(SystemAction)
+    /// A pinch, as a real trackpad gesture rather than as Command and a scroll.
+    ///
+    /// `magnification` is in thousandths, so 80 means 0.08, which is how much
+    /// bigger the content should get for this step. Thousandths rather than a
+    /// float because the whole protocol is integers, and a thousandth is far
+    /// finer than anything a finger can express.
+    ///
+    /// Zoom used to be Command held across a scroll, which is what a mouse
+    /// wheel user does and is not what a trackpad does. It worked in Chrome and
+    /// not in Preview, Photos, Maps or Xcode, all of which want a real gesture.
+    /// A real one can be synthesized, so it is.
+    case pinch(phase: PinchPhase, magnification: Int16)
     case ping(seq: UInt32)
 }
 

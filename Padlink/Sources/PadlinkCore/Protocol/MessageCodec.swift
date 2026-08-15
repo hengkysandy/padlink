@@ -12,6 +12,7 @@ public enum ClientMessageCodec {
         case ping = 7
         case modifierState = 8
         case systemAction = 9
+        case pinch = 10
     }
 
     public static func encode(_ message: ClientMessage) throws -> Data {
@@ -48,6 +49,10 @@ public enum ClientMessageCodec {
         case let .systemAction(action):
             writer.write(TypeByte.systemAction.rawValue)
             writer.write(action.rawValue)
+        case let .pinch(phase, magnification):
+            writer.write(TypeByte.pinch.rawValue)
+            writer.write(phase.rawValue)
+            writer.write(magnification)
         case let .ping(seq):
             writer.write(TypeByte.ping.rawValue)
             writer.write(seq)
@@ -115,6 +120,12 @@ public enum ClientMessageCodec {
                 throw CodecError.unknownSystemAction(rawAction)
             }
             message = .systemAction(action)
+        case .pinch:
+            let rawPhase = try reader.readUInt8()
+            guard let phase = PinchPhase(rawValue: rawPhase) else {
+                throw CodecError.unknownPinchPhase(rawPhase)
+            }
+            message = .pinch(phase: phase, magnification: try reader.readInt16())
         case .ping:
             message = .ping(seq: try reader.readUInt32())
         }
