@@ -1151,3 +1151,43 @@ because it decides where the pairing secret is stored.
 - Fixed the last two docs that still told you to `cd` into the deleted worktree.
 
 Repository is now one folder on `main`. Suites: **Core 125, Mac 115, iPad 379.**
+
+## 2026-08-15 12:07 — (auto session marker)
+
+## 2026-08-15 — v0.1.0-alpha2: the released DMG was one commit stale
+
+User installed the .dmg on a second MacBook. Everything worked except zoom.
+
+**Diagnosed before touching anything**, because "is it the iPad or the Mac" is
+answerable from git alone: the same iPad works against this Mac, so the iPad was
+never the variable.
+
+```
+git merge-base --is-ancestor cc611ee v0.1.0-alpha   ->  NO
+```
+
+The agent branched and merged `main` **before** `cc611ee` (pinch as a real
+gesture). So the release contained the spread fix, the stray right click fix and
+Mission Control, but still sent zoom as Command plus a scroll, which is exactly
+what does nothing outside Chrome.
+
+Not a code bug. A release cut from a stale branch.
+
+### v0.1.0-alpha2
+
+- Built from `e735f07` with `./padlink dmg 0.1.0-alpha2`. 1.1M.
+- Script leak scan passed, and **scanned again independently**: no
+  `embedded.provisionprofile`, `Signature=adhoc`, `TeamIdentifier=not set`, no team
+  id, no email, no UUID-shaped strings.
+- Confirmed the fix is genuinely in the binary rather than assumed: 49 pinch
+  symbols present.
+- Downloaded the published asset back and compared checksums, byte for byte.
+- `v0.1.0-alpha` notes now carry a banner pointing at alpha2 and saying plainly
+  that its zoom is broken.
+
+### Lesson, for `08-the-next-app.md`
+
+**A release is a snapshot, and the snapshot has a date.** Check what a build
+actually contains before shipping it, with `git merge-base --is-ancestor <fix>
+<tag>`, rather than assuming a branch that merged `main` at some point has the
+fix you finished afterwards.

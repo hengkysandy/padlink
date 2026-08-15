@@ -137,6 +137,24 @@ passed. The only signal was the count falling from 377 to 365.
 **The rule.** Read the test count on every run, and be suspicious when it falls.
 Prefer edits anchored to a unique string over edits anchored to a range.
 
+## 7b. A release is a snapshot, and the snapshot has a date
+
+The first published .dmg was cut from a branch that had merged `main` at some
+point, and it shipped without the zoom fix finished shortly afterwards. The build
+was correct, the code was correct, and the download was broken. It cost a full
+install on a second machine to find out.
+
+One command would have caught it:
+
+```bash
+git merge-base --is-ancestor <the-fix-commit> <the-tag>
+```
+
+**The rule.** Before publishing anything, list the fixes it is supposed to contain
+and check each one is genuinely an ancestor of the tag. "That branch merged main"
+is not the same as "that branch has the fix", and the gap is every commit you made
+after the merge.
+
 ## 8. What actually worked, and is worth copying
 
 Not everything was a mistake. These paid for themselves:
