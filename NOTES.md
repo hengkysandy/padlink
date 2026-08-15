@@ -14,29 +14,46 @@ keyboard and trackpad that drives the MacBook.
 
 ## TODO when resuming
 
-**2026-08-14: the end goal is met.** On real hardware, over real Wi-Fi, the iPad
-moves the Mac's cursor, types, and left-clicks. Verified by the user, not inferred
-from tests. Everything below is hardening and polish, not "make it work".
+**2026-08-15: the MVP is done.** Confirmed by hand on real hardware by the user:
+cursor, typing, left click, right click, two finger scroll, **pinch to zoom**,
+**three finger swipe up for Mission Control**, the on-screen keyboard, and the
+live latency figure.
 
-Branch `worktree-padlink-mac`. Suites: **Core 120, PadlinkMac 102,
-PadlinkPadTests 320.**
+Everything is on `main` and pushed. Suites: **Core 125, PadlinkMac 113,
+PadlinkPadTests 379.**
 
-Every review finding is now fixed and every planned feature is built. What is
-left is hand testing on the device, which no test can stand in for.
+Read [docs/learning/08-the-next-app.md](docs/learning/08-the-next-app.md) before
+starting another app. It is the retrospective, and the only learning file that is
+not about Padlink.
 
-Not yet exercised by hand:
-- [ ] Two-finger scroll, and the whole new gesture set. The simulator physically
-      cannot produce a multi-finger gesture, so the iPad is its first real test.
-- [ ] Right click (two-finger tap), pinch to zoom, three- and four-finger swipes.
-- [ ] The on-screen keyboard, and a locked modifier surviving several keys
-      (`Cmd` locked, then `Tab` `Tab` `Tab`).
-- [ ] Drag to select text.
-- [ ] A real Wi-Fi drop, to confirm the heartbeat notices in ~6s.
+### The one recurring chore
 
-The iPad build expires **2026-08-20** (free account, 7 day profile). Re-run
-`./padlink pad` to renew.
+**The iPad build expires 7 days after each install** (free Apple account). When
+the app refuses to open, plug the iPad in and run `./padlink pad`. Nothing is
+lost and the pairing survives.
 
-Then: merge to `main` and push.
+### Known and accepted limits
+
+- **Three fingers down (App Exposé) and four fingers sideways (switch spaces) do
+  nothing.** macOS ignores synthesized events for shortcuts the system owns, and
+  unlike Mission Control there is no app to open instead. Proved by experiment,
+  see the 2026-08-15 entries.
+- **Pinch uses undocumented `CGEvent` fields** (type 29). There is no public API
+  for a magnify event. Confined to one method in `MacInputSynthesizer`; if a
+  future macOS breaks it, only pinching stops.
+- iPadOS keeps four and five finger swipes unless the user turns them off in
+  Settings, General, Multitasking & Gestures.
+
+### Not done, if it is ever wanted
+
+- [ ] A DMG release for a second MacBook. An agent was working on this and its
+      state is on branch `worktree-agent-a76e1428a481392ef`. Note the constraint:
+      the repo is public and a normal build embeds the team id, the team name and
+      device UUIDs in `embedded.provisionprofile`, so it must be ad-hoc signed.
+- [ ] Momentum scrolling and drag to select have never been confirmed by hand.
+- [ ] A real Wi-Fi drop, to confirm the heartbeat notices in about 6 seconds.
+- [ ] `serviceClass` is unset on the connection. Setting it puts the traffic in a
+      higher priority Wi-Fi queue. Latency is already good, so this is optional.
 
 ## 2026-08-13 — Session 1 start
 - Read the video transcript. Confirmed the concept: iOS/Android client + Mac/Windows

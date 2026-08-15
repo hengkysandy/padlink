@@ -30,13 +30,14 @@ Full explanation in [01-apple-signing.md](01-apple-signing.md).
 | [05-gotchas.md](05-gotchas.md) | Every trap we hit, with the symptom that led us there |
 | [06-how-the-code-fits.md](06-how-the-code-fits.md) | The shape of the codebase and why it is split that way |
 | [07-gestures-and-keyboard.md](07-gestures-and-keyboard.md) | Every gesture, the on-screen keyboard, and how the modifier keys behave |
+| [08-the-next-app.md](08-the-next-app.md) | **What to do differently on the next app.** The only file here that is not about Padlink |
 
 ## The 60 second version
 
 Two apps talk over your Wi-Fi. The Mac app listens, the iPad app connects.
 
 ```
-cd /Users/hengkysandy/claude-chats/first-mobile-app/.claude/worktrees/padlink-mac/Padlink
+cd /Users/hengkysandy/claude-chats/first-mobile-app/Padlink
 
 ./padlink up      # build + launch the Mac app
 ./padlink pad     # build + install + launch on the plugged-in iPad
@@ -46,13 +47,13 @@ cd /Users/hengkysandy/claude-chats/first-mobile-app/.claude/worktrees/padlink-ma
 Then on the Mac, click the keyboard icon in the menu bar, choose "Pair a device",
 and point the iPad camera at the code. Drag on the iPad, the Mac's cursor moves.
 
-Two fingers scroll, two fingers tap to right click, pinch to zoom, three and four
-fingers swipe. The full list is in
+Two fingers scroll, two fingers tap to right click, pinch to zoom, three fingers
+up for Mission Control, three fingers sideways to go back and forward. The full
+list, including the two gestures macOS refuses to allow, is in
 [07-gestures-and-keyboard.md](07-gestures-and-keyboard.md).
 
-**The directory matters.** The app lives on a git branch in a worktree, not on
-`main`. Running these from `first-mobile-app/Padlink` fails, because the app does
-not exist there. See [04-build-and-run.md](04-build-and-run.md).
+The worktree the app was built in is merged into `main`, so these run from the
+repository itself now. See [04-build-and-run.md](04-build-and-run.md).
 
 ## What this project is
 
@@ -60,4 +61,6 @@ An iPad app plus a macOS app. The iPad becomes a trackpad and keyboard for the
 MacBook, over Wi-Fi. Pairing is by QR code, and the link is encrypted with a
 pre-shared key.
 
-Reached working end to end on real hardware on 2026-08-14.
+Reached working end to end on real hardware on 2026-08-14. Gestures, the
+on-screen keyboard, hardware keyboard passthrough and pinch to zoom were finished
+and confirmed by hand on 2026-08-15, which is where the MVP was called done.
