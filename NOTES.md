@@ -1191,3 +1191,22 @@ Not a code bug. A release cut from a stale branch.
 actually contains before shipping it, with `git merge-base --is-ancestor <fix>
 <tag>`, rather than assuming a branch that merged `main` at some point has the
 fix you finished afterwards.
+
+## 2026-08-15 12:16 — (auto session marker)
+
+## 2026-08-15 — One branch, one folder
+
+Deleted the remote `worktree-agent-a76e1428a481392ef`. The local copy went with the
+other worktrees earlier, but the agent had pushed it, so the remote survived.
+
+Checked before deleting, because a branch delete is not undoable from the GitHub
+side without knowing the sha:
+
+- `main..origin/worktree-agent-...` was **0 commits**, so nothing on it was missing
+  from `main`.
+- Its tip `ce55090` is reachable from `main`.
+- **Both release tags are reachable from `main` on their own**, so neither download
+  could be orphaned by the delete. Confirmed again afterwards, and both release
+  assets still resolve.
+
+Final state: one branch (`main`) local and remote, two tags, one working folder.
