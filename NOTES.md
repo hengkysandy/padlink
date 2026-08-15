@@ -858,3 +858,51 @@ the throughput is far too low for a stream of pointer moves. Classic SPP is not
 available to third-party iOS apps without MFi hardware.
 
 ## 2026-08-15 11:06 — (auto session marker)
+
+## 2026-08-15 — The readout paid for itself in one test
+
+User reported back from the iPad:
+- "2 finger show 2 zoom" → the pinch decision now works. Root cause 1 confirmed fixed.
+- "3 finger swipe show 3 swipe, but no action" → **decisive**. The iPad sees three
+  fingers, fires the swipe, and sends the keystroke. So touch handling was never
+  the problem, and both earlier hypotheses (touches cancelled by iPadOS, third
+  finger landing outside the view) are dead.
+- "single finger click always stuck at right click" → new, and the thread to pull.
+- "latency is better now".
+
+### Root cause 3: every multi-finger gesture ended in a right click
+
+- A hand lifts as 3 → 2 → 1 → 0. The two finger moment on the way *out* is a brand
+  new `TwoFinger` with `startedAt = now` and `maxTravel = 0`.
+- `wasTap` therefore passed: undecided ✓, `remainingCount < 2` ✓, elapsed ~0.03s ✓,
+  travel 0 ✓. **Right click, on every three and four finger gesture.**
+- `remainingCount < 2` only guards the way *up* (a third finger landing). Nobody
+  guarded the way down.
+- Explains all three symptoms at once: Control+Up opens Mission Control and the
+  stray right click dismisses it ~50ms later ("no action"); a context menu left
+  open swallows every following tap ("single finger stuck at right click").
+
+Fix: `TwoFinger.tapEligible`, fed by a new `fingersOnlyAdded` flag.
+
+Neither simpler rule works, and this is worth remembering:
+- "started from rest" is **too strict**: the two fingers of a real tap land
+  milliseconds apart, so a genuine two finger tap arrives as 1 then 2.
+- "two fingers down and still" is **too loose**: that is exactly the lifting case.
+- The separator is the **direction the finger count is travelling**, which nothing
+  in the type recorded.
+
+Verified properly: the three new tests were run with the guard removed (all three
+fail) and with it (all pass). Not assumed.
+
+Suites: **Core 120, Mac 108, iPad 377.** Commit `1e5ff36`, pushed. iPad redeployed.
+
+### Still open
+
+- Whether the Mac acts on Control+Up at all. Could not test from here: the test
+  client hung waiting for a connection (not paired, and the Mac takes one peer at
+  a time). Added arrow key support to `./padlink key` for when it can be paired.
+- If the swipe still does nothing with the stray right click gone, the next
+  suspect is that `stroke()` puts modifiers only on the key event's flags and
+  never posts a real Control key down. Some macOS symbolic hotkeys want the
+  modifier genuinely held.
+- Drag to select, and momentum, both still unverified by hand.
